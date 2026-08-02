@@ -72,8 +72,9 @@
         const gm=this.el.sceneEl.components['baseball-game'];if(!gm.active)return;
         this.winding=true;gm.callout('GET READY',430);gm.pitcher.removeAttribute('animation__throw');gm.pitcher.setAttribute('animation__throw','property:rotation;from:0 0 0;to:-24 0 10;dir:alternate;dur:330;loop:1;easing:easeInOutQuad');
         this.releaseTimer=setTimeout(()=>{
-          // The ball crosses home plate, not the player's head position.
-          if(!gm.active)return;const targetX=(Math.random()-.5)*.7,targetY=.86+Math.random()*.55,speed=22+Math.random()*4,distance=15.9,time=distance/speed;
+          // Uniform random target across the visible strike zone: inside/outside
+          // and high/low pitches all have the same chance.
+          if(!gm.active)return;const targetX=THREE.MathUtils.lerp(-.40,.40,Math.random()),targetY=THREE.MathUtils.lerp(.80,1.48,Math.random()),speed=22+Math.random()*4,distance=15.9,time=distance/speed;
           this.startPos.set(-.32,2.02,-15.55);this.el.object3D.position.copy(this.startPos);this.v.set((targetX+.32)/time,(targetY-2.02)/time,speed);this.flightTime=0;this.flying=true;this.winding=false;this.batted=false;this.crossedPlate=false;this.el.setAttribute('visible',true);gm.tone(145,.045,'triangle');
         },560);
       },
