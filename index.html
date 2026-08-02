@@ -32,58 +32,92 @@
         window.addEventListener('keydown',e=>{if((e.code==='Space'||e.code==='Enter')&&!e.repeat){e.preventDefault();this.swing()}});
         window.addEventListener('pointerdown',e=>{if(this.active&&!e.target.closest('.overlay'))this.swing()});
         document.querySelectorAll('[hand-controls]').forEach(c=>{c.addEventListener('triggerdown',()=>this.swing());c.addEventListener('gripdown',()=>this.swing())});
+        this.xrMenu=document.querySelector('#xrMenu');
+        this.el.addEventListener('enter-vr',()=>{this.overlay.classList.add('hidden');this.xrMenu.setAttribute('visible',!this.active)});
+        this.el.addEventListener('exit-vr',()=>{this.xrMenu.setAttribute('visible',false);if(!this.active)this.overlay.classList.remove('hidden')});
         this.updateUI();
       },
       start(){
-        this.active=true;this.score=0;this.hits=0;this.homeRuns=0;this.strikes=0;this.outs=0;this.pitches=0;this.nextPitch=700;this.ball.components.pitch.reset();this.overlay.classList.add('hidden');
+        this.active=true;this.score=0;this.hits=0;this.homeRuns=0;this.strikes=0;this.outs=0;this.pitches=0;this.nextPitch=700;this.ball.components.pitch.reset();this.overlay.classList.add('hidden');this.xrMenu.setAttribute('visible',false);
         try{this.audio=this.audio||new(window.AudioContext||window.webkitAudioContext)();this.audio.resume()}catch(e){}this.updateUI();this.callout('PLAY BALL!',900);
       },
       tick(t,dt){if(!this.active)return;if(this.nextPitch>0){this.nextPitch-=dt;if(this.nextPitch<=0)this.ball.components.pitch.throwBall()}},
       swing(){
-        if(!this.active||this.bat.components['bat-swing'].swinging)return;
+        if(!this.active||this.el.is('vr-mode')||this.bat.components['bat-swing'].swinging)return;
         this.bat.components['bat-swing'].go();this.tone(115,.07,'triangle');
         const p=this.ball.components.pitch;if(!p.flying)return;
         const pos=this.ball.object3D.position;
         if(pos.z>-1.15&&pos.z<.42&&pos.y>.28&&pos.y<2.7&&Math.abs(pos.x)<1.28){
           const center=Math.abs(pos.z+.33)+Math.abs(pos.y-1.16)*.35+Math.abs(pos.x)*.3;
-          p.hit(center);this.hits++;this.score+=center<.34?1000:center<.7?500:250;if(center<.34)this.homeRuns++;this.callout(center<.34?'HOME RUN!':center<.7?'NICE HIT!':'HIT!',950);this.tone(center<.34?520:360,.18,'square');this.updateUI();
+          this.contactHit(center);
         }
       },
+      contactHit(quality){const p=this.ball.components.pitch;if(!p.flying||p.batted)return;p.hit(quality);this.hits++;this.score+=quality<.34?1000:quality<.7?500:250;if(quality<.34)this.homeRuns++;this.callout(quality<.34?'HOME RUN!':quality<.7?'NICE HIT!':'HIT!',950);this.tone(quality<.34?520:360,.18,'square');this.updateUI()},
       pitchDone(result){
         if(!this.active)return;this.pitches++;
         if(result==='strike'){this.strikes++;this.callout('STRIKE!',650);this.tone(80,.14,'sawtooth');if(this.strikes>=3){this.outs++;this.strikes=0;setTimeout(()=>this.callout('OUT!',700),500)}}
         else if(result==='foul'){this.strikes=Math.min(2,this.strikes+1);this.callout('FOUL',650)}
         if(this.outs>=3||this.pitches>=12){setTimeout(()=>this.end(),900);return}this.nextPitch=1050+Math.random()*2100;this.updateUI();
       },
-      end(){if(!this.active)return;this.active=false;this.ball.components.pitch.reset();document.querySelector('#result').style.display='block';document.querySelector('#result').innerHTML=`試合終了！<br>SCORE ${this.score.toLocaleString()} ／ ${this.hits} HITS ／ ${this.homeRuns} HR`;this.button.textContent='もう一度プレイ';this.overlay.classList.remove('hidden')},
+      end(){if(!this.active)return;this.active=false;this.ball.components.pitch.reset();document.querySelector('#result').style.display='block';document.querySelector('#result').innerHTML=`試合終了！<br>SCORE ${this.score.toLocaleString()} ／ ${this.hits} HITS ／ ${this.homeRuns} HR`;this.button.textContent='もう一度プレイ';if(this.el.is('vr-mode')){this.xrMenu.setAttribute('visible',true);document.querySelector('#xrResult').setAttribute('value',`SCORE ${this.score}  HITS ${this.hits}  HR ${this.homeRuns}`)}else this.overlay.classList.remove('hidden')},
       callout(s,ms){this.message.textContent=s;this.message.classList.add('show');clearTimeout(this.msgTimer);this.msgTimer=setTimeout(()=>this.message.classList.remove('show'),ms)},
       tone(f,d,type){if(!this.audio)return;const o=this.audio.createOscillator(),g=this.audio.createGain();o.type=type;o.frequency.setValueAtTime(f,this.audio.currentTime);g.gain.setValueAtTime(.045,this.audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+d);o.connect(g).connect(this.audio.destination);o.start();o.stop(this.audio.currentTime+d)},
       updateUI(){document.querySelector('#score').textContent=String(this.score).padStart(5,'0');document.querySelector('#hits').textContent=this.hits;document.querySelector('#hr').textContent=this.homeRuns;document.querySelector('#strikes').textContent='●'.repeat(this.strikes)+'○'.repeat(2-this.strikes);document.querySelector('#outs').textContent='●'.repeat(this.outs)+'○'.repeat(Math.max(0,3-this.outs))}
     });
 
     AFRAME.registerComponent('pitch',{
-      init(){this.flying=false;this.batted=false;this.v=new THREE.Vector3();this.reset()},
-      reset(){this.flying=false;this.batted=false;this.el.setAttribute('visible',false)},
+      init(){this.flying=false;this.batted=false;this.winding=false;this.crossedPlate=false;this.v=new THREE.Vector3();this.startPos=new THREE.Vector3();this.flightTime=0;this.reset()},
+      reset(){this.flying=false;this.batted=false;this.winding=false;this.crossedPlate=false;clearTimeout(this.releaseTimer);this.el.setAttribute('visible',false)},
       throwBall(){
         const gm=this.el.sceneEl.components['baseball-game'];if(!gm.active)return;
-        const x=(Math.random()-.5)*1.15,y=1.0+Math.random()*.75,speed=10.8+Math.random()*2.4,time=16/speed;
-        this.el.object3D.position.set(0,2.05,-16);this.v.set(x/time,(y-2.05+.5*2.45*time*time)/time,speed);this.flying=true;this.batted=false;this.el.setAttribute('visible',true);gm.pitcher.setAttribute('animation__throw','property:rotation;from:0 0 0;to:-20 0 8;dir:alternate;dur:220;loop:1');
+        this.winding=true;gm.callout('GET READY',430);gm.pitcher.removeAttribute('animation__throw');gm.pitcher.setAttribute('animation__throw','property:rotation;from:0 0 0;to:-24 0 10;dir:alternate;dur:330;loop:1;easing:easeInOutQuad');
+        this.releaseTimer=setTimeout(()=>{
+          if(!gm.active)return;const targetX=(Math.random()-.5)*1.05,targetY=1.02+Math.random()*.62,speed=22+Math.random()*4,distance=15.9,time=distance/speed;
+          this.startPos.set(-.32,2.02,-15.55);this.el.object3D.position.copy(this.startPos);this.v.set((targetX+.32)/time,(targetY-2.02)/time,speed);this.flightTime=0;this.flying=true;this.winding=false;this.batted=false;this.crossedPlate=false;this.el.setAttribute('visible',true);gm.tone(145,.045,'triangle');
+        },560);
       },
       hit(quality){
         this.batted=true;const p=this.el.object3D.position;this.v.set(-p.x*1.8+(Math.random()-.5)*2.5,quality<.34?10.5:7.5,quality<.34?-18:-13-Math.random()*3);this.spin=quality<.34?.025:.04;
       },
       tick(t,dt){
-        if(!this.flying)return;const d=Math.min(dt/1000,.035),p=this.el.object3D.position;p.addScaledVector(this.v,d);this.v.y-=9.8*d;this.el.object3D.rotation.x+=d*18;this.el.object3D.rotation.z+=d*11;
+        if(!this.flying)return;const d=Math.min(dt/1000,.035),p=this.el.object3D.position;
+        if(this.batted){p.addScaledVector(this.v,d);this.v.y-=9.8*d}else{this.flightTime+=d;p.copy(this.startPos).addScaledVector(this.v,this.flightTime)}
+        this.el.object3D.rotation.x+=d*18;this.el.object3D.rotation.z+=d*11;
         const gm=this.el.sceneEl.components['baseball-game'];
         if(this.batted){if(p.y<.08||p.z<-55){this.flying=false;this.el.setAttribute('visible',false);gm.pitchDone('hit')}}
-        else if(p.z>.75||p.y<.05){this.flying=false;this.el.setAttribute('visible',false);gm.pitchDone('strike')}
+        else{
+          if(!this.crossedPlate&&p.z>=.35){this.crossedPlate=true}
+          if(this.crossedPlate&&p.z>2.8){this.flying=false;this.el.setAttribute('visible',false);gm.tone(105,.05,'triangle');gm.pitchDone('strike')}
+          else if(!this.crossedPlate&&p.y<.05){this.flying=false;this.el.setAttribute('visible',false);gm.nextPitch=650}
+        }
       }
     });
 
     AFRAME.registerComponent('bat-swing',{
-      init(){this.swinging=false;this.rest=new THREE.Euler(0,0,THREE.MathUtils.degToRad(-28))},
+      init(){this.swinging=false;this.rest=new THREE.Euler(0,0,THREE.MathUtils.degToRad(-28));this.hand=document.querySelector('#rightHand');this.lastTip=new THREE.Vector3();this.tip=new THREE.Vector3();this.base=new THREE.Vector3();this.handPos=new THREE.Vector3();this.handQuat=new THREE.Quaternion();this.offsetQuat=new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI/2,0,0));this.ready=false},
       go(){this.swinging=true;this.elapsed=0},
-      tick(t,dt){if(!this.swinging)return;this.elapsed+=dt;const u=Math.min(1,this.elapsed/260),a=-28+205*Math.sin(u*Math.PI*.86);this.el.object3D.rotation.set(0,THREE.MathUtils.degToRad(-18+45*u),THREE.MathUtils.degToRad(a));if(u>=1){this.swinging=false;this.el.object3D.rotation.set(0,0,THREE.MathUtils.degToRad(-28))}}
+      tick(t,dt){
+        const gm=this.el.sceneEl.components['baseball-game'];
+        if(this.el.sceneEl.is('vr-mode')&&this.hand){
+          this.hand.object3D.getWorldPosition(this.handPos);this.hand.object3D.getWorldQuaternion(this.handQuat);this.el.object3D.position.copy(this.handPos);this.el.object3D.quaternion.copy(this.handQuat).multiply(this.offsetQuat);this.el.object3D.updateMatrixWorld(true);
+          this.base.set(0,0,0).applyMatrix4(this.el.object3D.matrixWorld);this.tip.set(0,1.65,0).applyMatrix4(this.el.object3D.matrixWorld);
+          const speed=this.ready&&dt?this.tip.distanceTo(this.lastTip)/(dt/1000):0;
+          const pitch=gm?.ball.components.pitch;if(gm?.active&&pitch?.flying&&!pitch.batted&&speed>1.25){
+            const bp=gm.ball.object3D.position,seg=new THREE.Vector3().subVectors(this.tip,this.base),toBall=new THREE.Vector3().subVectors(bp,this.base);const u=THREE.MathUtils.clamp(toBall.dot(seg)/seg.lengthSq(),0,1);const near=this.base.clone().addScaledVector(seg,u);
+            if(near.distanceTo(bp)<.24){const quality=THREE.MathUtils.clamp(.22+(4.5-speed)*.09,0.12,.8);gm.contactHit(quality)}
+          }
+          this.lastTip.copy(this.tip);this.ready=true;return;
+        }
+        this.ready=false;if(!this.swinging)return;this.elapsed+=dt;const u=Math.min(1,this.elapsed/260),a=-28+205*Math.sin(u*Math.PI*.86);this.el.object3D.rotation.set(0,THREE.MathUtils.degToRad(-18+45*u),THREE.MathUtils.degToRad(a));if(u>=1){this.swinging=false;this.el.object3D.rotation.set(0,0,THREE.MathUtils.degToRad(-28))}
+      }
+    });
+
+    AFRAME.registerComponent('xr-start',{
+      init(){
+        this.el.addEventListener('mouseenter',()=>this.el.setAttribute('material','color','#ffe477'));
+        this.el.addEventListener('mouseleave',()=>this.el.setAttribute('material','color','#ffc83d'));
+        this.el.addEventListener('click',e=>{e.stopPropagation();this.el.sceneEl.components['baseball-game'].start()});
+      }
     });
   </script>
 </head>
@@ -95,16 +129,36 @@
     <div id="message"></div><div class="tip">クリック / スペース / VRトリガーでスイング</div>
     <div id="overlay" class="overlay"><div class="panel"><div class="kicker">WEBXR BATTING CHALLENGE</div><h1>STADIUM<br>SLUGGER</h1><p class="subtitle">投手がランダムなタイミングと球速で投げてきます。<br>ボールをよく見て、ホームベースの上でスイング！<br><span class="rules">全12球、または3アウトで試合終了</span></p><p id="result" class="result"></p><button id="startButton">プレイボール！</button></div></div>
   </div>
-  <a-scene baseball-game vr-mode-ui="enabled:true" renderer="colorManagement:true;antialias:true;physicallyCorrectLights:true" background="color:#8cc8e8">
+  <a-scene baseball-game cursor="rayOrigin:mouse" raycaster="objects:.clickable" vr-mode-ui="enabled:true" renderer="colorManagement:true;antialias:true;physicallyCorrectLights:true" background="color:#8cc8e8">
     <a-assets><a-mixin id="white" material="color:#eee;roughness:.85"></a-mixin></a-assets>
     <a-entity id="rig">
-      <a-camera position="0 1.65 2.1" look-controls wasd-controls="enabled:false"><a-entity position="0 0 -1"><a-ring radius-inner=".012" radius-outer=".016" color="#fff" material="shader:flat"></a-ring></a-entity></a-camera>
-      <a-entity hand-controls="hand:right;handModelStyle:lowPoly;color:#c48b62"></a-entity><a-entity hand-controls="hand:left;handModelStyle:lowPoly;color:#c48b62"></a-entity>
+      <a-camera position="0 1.65 2.1" look-controls wasd-controls="enabled:false"><a-entity cursor="fuse:true;fuseTimeout:1200" raycaster="objects:.clickable;far:12" position="0 0 -1"><a-ring radius-inner=".012" radius-outer=".018" color="#fff" material="shader:flat"></a-ring></a-entity></a-camera>
+      <a-entity id="rightHand" hand-controls="hand:right;handModelStyle:lowPoly;color:#c48b62" laser-controls="hand:right" raycaster="objects:.clickable;far:12" line="color:#ffc83d"></a-entity><a-entity id="leftHand" hand-controls="hand:left;handModelStyle:lowPoly;color:#c48b62" laser-controls="hand:left" raycaster="objects:.clickable;far:12" line="color:#ffc83d"></a-entity>
+    </a-entity>
+    <a-entity id="xrMenu" visible="false" position="0 1.7 -2.5">
+      <a-plane width="3.25" height="2" color="#0b2918" material="opacity:.96;roughness:.8"></a-plane>
+      <a-text value="STADIUM SLUGGER" align="center" color="#fff4cf" width="4.8" position="0 .57 .015"></a-text>
+      <a-text value="Trigger or gaze to start" align="center" color="#b9d8bd" width="3.1" position="0 .18 .015"></a-text>
+      <a-plane class="clickable" xr-start width="1.65" height=".48" color="#ffc83d" position="0 -.28 .035" material="shader:flat"></a-plane>
+      <a-text value="PLAY BALL!" align="center" color="#281600" width="2.5" position="0 -.32 .055"></a-text>
+      <a-text id="xrResult" value="" align="center" color="#ffe088" width="3.2" position="0 -.72 .02"></a-text>
     </a-entity>
     <a-entity id="bat" bat-swing position=".82 1.22 .25" rotation="0 0 -28">
-      <a-cylinder radius=".065" height="1.55" position="0 .72 0" color="#d6a45d" material="roughness:.48" geometry="segmentsRadial:16"></a-cylinder><a-cylinder radius=".11" height=".9" position="0 1.02 0" color="#e3b66d"></a-cylinder><a-cylinder radius=".105" height=".07" position="0 -.07 0" color="#4c2515"></a-cylinder>
+      <!-- regulation-sized wooden bat: knob, taped handle, tapered neck and barrel -->
+      <a-cylinder radius=".075" height=".055" position="0 -.03 0" color="#211711" material="roughness:.9" geometry="segmentsRadial:24"></a-cylinder>
+      <a-sphere radius=".087" scale="1 .45 1" position="0 -.07 0" color="#211711" material="roughness:.9"></a-sphere>
+      <a-cylinder radius=".038" height=".43" position="0 .21 0" color="#29231f" material="roughness:1" geometry="segmentsRadial:24"></a-cylinder>
+      <a-torus radius=".041" radius-tubular=".006" position="0 .04 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .12 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .20 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .28 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .36 0" rotation="90 0 0" color="#b8aa91"></a-torus>
+      <a-cone radius-bottom=".039" radius-top=".09" height=".54" position="0 .695 0" color="#bd7635" material="roughness:.58;metalness:.02" geometry="segmentsRadial:32"></a-cone>
+      <a-cylinder radius=".09" height=".69" position="0 1.31 0" color="#d8954c" material="roughness:.52;metalness:.02" geometry="segmentsRadial:32"></a-cylinder>
+      <a-sphere radius=".09" scale="1 .3 1" position="0 1.655 0" color="#d8954c" material="roughness:.52"></a-sphere>
+      <a-ring radius-inner=".068" radius-outer=".075" position="0 1.18 .064" rotation="90 0 0" color="#6f3c1d" material="shader:flat;side:double"></a-ring>
     </a-entity>
-    <a-sphere id="ball" pitch radius=".105" color="#fff" material="roughness:.7"></a-sphere>
+    <a-entity id="ball" pitch visible="false">
+      <a-sphere radius=".14" color="#fffdf4" material="roughness:.72"></a-sphere>
+      <a-torus radius=".105" radius-tubular=".006" rotation="18 12 0" color="#b52d2d" material="shader:flat"></a-torus><a-torus radius=".105" radius-tubular=".006" rotation="-18 12 0" color="#b52d2d" material="shader:flat"></a-torus>
+      <a-cone radius-bottom=".075" radius-top=".01" height=".6" position="0 0 -.34" rotation="-90 0 0" color="#ffffff" material="shader:flat;transparent:true;opacity:.2"></a-cone>
+    </a-entity>
     <a-entity id="pitcher" position="0 0 -16"><a-cylinder radius=".3" height="1.15" position="0 .85 0" color="#f1eee4"></a-cylinder><a-sphere radius=".25" position="0 1.65 0" color="#b97953"></a-sphere><a-cylinder radius=".27" height=".16" position="0 1.86 0" color="#cf3434"></a-cylinder><a-box width=".85" height=".08" depth=".2" position="0 .06 .15" color="#fff"></a-box></a-entity>
     <a-plane position="0 .012 0" rotation="-90 0 0" width="80" height="90" color="#216b37" material="roughness:1"></a-plane>
     <a-plane position="0 .018 -13" rotation="-90 0 45" width="16" height="16" color="#9b683a"></a-plane>
