@@ -1,161 +1,148 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="ja">
 <head>
-    <title>WebXR Space Interceptor</title>
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-    <script>
-        // ゲーム全体の管理コンポーネント
-        AFRAME.registerComponent('game-manager', {
-            init: function () {
-                this.score = 0;
-                this.scoreText = document.querySelector('#scoreBoard');
-                this.rig = document.querySelector('#ship-rig'); // 宇宙船の土台
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050816">
+  <title>NEON RIFT — WebXR Defense</title>
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <style>
+    :root { --cyan:#53f6ff; --pink:#ff3cac; --gold:#ffd166; --ink:#050816; }
+    * { box-sizing:border-box; }
+    body { margin:0; overflow:hidden; background:var(--ink); font-family:Arial, sans-serif; }
+    .ui { position:fixed; inset:0; z-index:10; pointer-events:none; color:white; }
+    .brand { position:absolute; top:24px; left:28px; font-size:13px; font-weight:900; letter-spacing:.32em; color:var(--cyan); text-shadow:0 0 18px #00eaff; }
+    .stats { position:absolute; top:24px; right:28px; display:flex; gap:9px; }
+    .stat { min-width:96px; padding:10px 14px; background:rgba(5,8,22,.62); border:1px solid rgba(83,246,255,.3); border-radius:8px; backdrop-filter:blur(9px); }
+    .label { display:block; font-size:9px; letter-spacing:.22em; color:#8da5be; }
+    .value { display:block; margin-top:3px; font-weight:900; font-size:19px; letter-spacing:.06em; }
+    #combo { color:var(--gold); }
+    .shield { position:absolute; left:28px; bottom:27px; width:min(310px,55vw); }
+    .shield-head { display:flex; justify-content:space-between; margin-bottom:7px; font-size:10px; font-weight:bold; letter-spacing:.18em; }
+    .bar { height:7px; padding:1px; border:1px solid rgba(83,246,255,.45); transform:skewX(-18deg); }
+    #shieldFill { width:100%; height:100%; background:linear-gradient(90deg,var(--pink),var(--cyan)); box-shadow:0 0 14px var(--cyan); transition:width .25s; }
+    .tip { position:absolute; bottom:27px; left:50%; transform:translateX(-50%); color:#8da5be; font-size:10px; letter-spacing:.12em; white-space:nowrap; }
+    .overlay { position:absolute; inset:0; display:grid; place-items:center; pointer-events:auto; background:radial-gradient(circle at 50% 45%,rgba(24,41,92,.55),rgba(2,3,12,.9)); transition:.35s; }
+    .overlay.hidden { opacity:0; visibility:hidden; pointer-events:none; }
+    .panel { width:min(560px,90vw); text-align:center; padding:44px 30px; border:1px solid rgba(83,246,255,.35); border-radius:18px; background:linear-gradient(145deg,rgba(12,18,42,.9),rgba(5,8,22,.75)); box-shadow:0 0 80px rgba(54,226,255,.12), inset 0 0 35px rgba(54,226,255,.04); backdrop-filter:blur(12px); }
+    .kicker { color:var(--pink); letter-spacing:.4em; font-size:10px; font-weight:bold; }
+    h1 { margin:12px 0 4px; font-size:clamp(40px,10vw,76px); line-height:.92; font-style:italic; letter-spacing:-.06em; text-shadow:4px 4px 0 rgba(255,60,172,.45), -3px -2px 0 rgba(83,246,255,.3); }
+    .subtitle { margin:18px auto 28px; max-width:380px; color:#a9b9ce; font-size:13px; line-height:1.75; }
+    button { border:0; border-radius:7px; padding:14px 34px; color:#05101a; background:linear-gradient(90deg,var(--cyan),#b8fff1); font-weight:900; letter-spacing:.16em; cursor:pointer; box-shadow:0 0 25px rgba(83,246,255,.4); transition:.2s; }
+    button:hover { transform:translateY(-2px) scale(1.02); box-shadow:0 0 38px rgba(83,246,255,.65); }
+    #result { display:none; margin:0 0 22px; font-size:13px; color:var(--gold); letter-spacing:.15em; }
+    .flash { position:absolute; inset:0; background:var(--pink); opacity:0; mix-blend-mode:screen; transition:opacity .15s; }
+    @media(max-width:600px){ .brand{top:16px;left:16px}.stats{top:14px;right:14px}.stat{min-width:70px;padding:8px}.value{font-size:15px}.tip{display:none}.shield{left:16px;bottom:18px} }
+  </style>
+  <script>
+    AFRAME.registerComponent('game-manager', {
+      init() {
+        this.active = false; this.score = 0; this.combo = 0; this.shield = 100;
+        this.timeLeft = 60; this.wave = 1; this.spawnTimer = 0; this.audio = null;
+        this.pool = [...document.querySelectorAll('.enemy')];
+        this.scoreEl = document.querySelector('#score'); this.comboEl = document.querySelector('#combo');
+        this.timeEl = document.querySelector('#timer'); this.shieldEl = document.querySelector('#shieldFill');
+        document.querySelector('#startButton').addEventListener('click', () => this.start());
+        this.updateUI();
+      },
+      start() {
+        this.score=0; this.combo=0; this.shield=100; this.timeLeft=60; this.wave=1; this.spawnTimer=0; this.active=true;
+        document.querySelector('#overlay').classList.add('hidden');
+        this.pool.forEach((e,i) => { e.setAttribute('visible', i<4); if(i<4) e.components['rift-enemy'].spawn(); });
+        try { this.audio = this.audio || new (window.AudioContext||window.webkitAudioContext)(); this.audio.resume(); } catch(e){}
+        this.updateUI();
+      },
+      tick(t,dt) {
+        if(!this.active) return;
+        this.timeLeft -= dt/1000;
+        this.wave = Math.min(5, 1 + Math.floor((60-this.timeLeft)/12));
+        this.spawnTimer += dt;
+        if(this.spawnTimer > Math.max(800,2400-this.wave*280)) {
+          this.spawnTimer=0; const idle=this.pool.find(e=>!e.getAttribute('visible')); if(idle){idle.setAttribute('visible',true);idle.components['rift-enemy'].spawn();}
+        }
+        if(this.timeLeft<=0 || this.shield<=0) this.end();
+        this.updateUI();
+      },
+      hit(enemy) {
+        if(!this.active) return;
+        this.combo++; this.score += Math.round(enemy.points*(1+Math.min(this.combo,10)*.15));
+        this.tone(180+this.combo*24,.055,'square'); this.updateUI();
+      },
+      breach() {
+        if(!this.active) return;
+        this.shield=Math.max(0,this.shield-14); this.combo=0; this.tone(70,.18,'sawtooth');
+        const f=document.querySelector('#flash'); f.style.opacity=.28; setTimeout(()=>f.style.opacity=0,80); this.updateUI();
+      },
+      tone(freq,duration,type) {
+        if(!this.audio) return; const o=this.audio.createOscillator(),g=this.audio.createGain();
+        o.type=type;o.frequency.setValueAtTime(freq,this.audio.currentTime);o.frequency.exponentialRampToValueAtTime(freq*1.7,this.audio.currentTime+duration);
+        g.gain.setValueAtTime(.035,this.audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+duration);
+        o.connect(g).connect(this.audio.destination);o.start();o.stop(this.audio.currentTime+duration);
+      },
+      updateUI(){ this.scoreEl.textContent=String(this.score).padStart(6,'0');this.comboEl.textContent='×'+this.combo;this.timeEl.textContent=Math.max(0,Math.ceil(this.timeLeft));this.shieldEl.style.width=this.shield+'%'; },
+      end() {
+        this.active=false; this.pool.forEach(e=>e.setAttribute('visible',false));
+        document.querySelector('#result').style.display='block';
+        document.querySelector('#result').textContent=(this.shield<=0?'防衛線崩壊':'作戦完了')+'  //  SCORE '+this.score;
+        document.querySelector('#startButton').textContent='もう一度プレイ'; document.querySelector('#overlay').classList.remove('hidden');
+      }
+    });
 
-                // キーボード操作の検知（A/Dで旋回）
-                this.keys = {};
-                window.addEventListener('keydown', (e) => { this.keys[e.key.toLowerCase()] = true; });
-                window.addEventListener('keyup', (e) => { this.keys[e.key.toLowerCase()] = false; });
-
-                // 弾のプール（使い回し用）
-                this.laserColor = '#00FF66';
-            },
-            tick: function (time, timeDelta) {
-                if (!this.rig) return;
-
-                // 船の旋回制御（Aで左、Dで右）
-                let rotation = this.rig.getAttribute('rotation');
-                if (this.keys['a']) {
-                    rotation.y += 0.08 * timeDelta; // 左旋回
-                }
-                if (this.keys['d']) {
-                    rotation.y -= 0.08 * timeDelta; // 右旋回
-                }
-                this.rig.setAttribute('rotation', rotation);
-            },
-            addScore: function (pts) {
-                this.score += pts;
-                this.scoreText.setAttribute('value', 'TARGET DESTROYED: ' + this.score);
-            }
-        });
-
-        // ターゲット（敵機・隕石）の挙動
-        AFRAME.registerComponent('space-target', {
-            init: function () {
-                let el = this.el;
-                this.mgr = document.querySelector('a-scene').components['game-manager'];
-
-                // ロックオン（ホバー）時の演出
-                el.addEventListener('mouseenter', () => {
-                    el.setAttribute('material', 'emissive', '#FF3333');
-                    el.setAttribute('material', 'emissiveIntensity', '1');
-                });
-                el.addEventListener('mouseleave', () => {
-                    el.setAttribute('material', 'emissiveIntensity', '0.2');
-                });
-
-                // 撃撃（クリック）時の処理
-                el.addEventListener('click', () => {
-                    if (this.mgr) this.mgr.addScore(100);
-
-                    // パルス爆発エフェクト（一瞬巨大化して消える）
-                    el.setAttribute('animation__explode', 'property: scale; to: 3 3 3; dur: 200');
-                    el.setAttribute('animation__fade', 'property: material.opacity; to: 0; dur: 200');
-
-                    setTimeout(() => {
-                        this.respawn();
-                    }, 200);
-                });
-            },
-            respawn: function () {
-                let el = this.el;
-                // プレイヤーの前方半球にランダム配置
-                let angle = Math.random() * Math.PI * 2;
-                let radius = 15 + Math.random() * 15;
-                let x = Math.cos(angle) * radius;
-                let y = (Math.random() - 0.2) * 10;
-                let z = Math.sin(angle) * radius;
-
-                el.setAttribute('position', { x: x, y: y, z: z });
-                el.removeAttribute('animation__explode');
-                el.removeAttribute('animation__fade');
-                el.setAttribute('scale', '1 1 1');
-                el.setAttribute('material', 'opacity', '1');
-
-                // タイプ別の見た目変化（球体＝隕石、コーン＝敵戦闘機）
-                let types = ['a-sphere', 'a-cone'];
-                let chosen = types[Math.floor(Math.random() * types.length)];
-                // 簡易的に色や発光度をリセット
-                el.setAttribute('material', 'emissive', '#FFCC00');
-            }
-        });
-    </script>
+    AFRAME.registerComponent('rift-enemy', {
+      schema:{kind:{default:0}},
+      init(){ this.scene=document.querySelector('a-scene');this.speed=.002;this.points=100;this.dead=false;this.el.addEventListener('click',()=>this.destroy()); },
+      spawn(){
+        const angle=Math.random()*Math.PI*2, radius=27+Math.random()*8, y=-3+Math.random()*9;
+        this.el.setAttribute('position',{x:Math.sin(angle)*radius,y:y,z:Math.cos(angle)*radius});
+        this.el.setAttribute('scale','1 1 1');this.el.setAttribute('material','opacity',1);this.el.removeAttribute('animation__burst');this.el.removeAttribute('animation__fade');
+        this.speed=.0015+Math.random()*.0012+(this.scene.components['game-manager']?.wave||1)*.00022;
+        this.points=100+(this.data.kind*50);this.dead=false;
+      },
+      tick(t,dt){
+        const gm=this.scene.components['game-manager'];if(!gm?.active||this.dead||!this.el.getAttribute('visible'))return;
+        const p=this.el.object3D.position, dist=p.length();
+        p.x-=p.x*this.speed*dt;p.y-=p.y*this.speed*dt;p.z-=p.z*this.speed*dt;
+        this.el.object3D.rotation.x+=dt*.0007;this.el.object3D.rotation.y+=dt*.0011;
+        const s=1+Math.sin(t*.007)*.06;this.el.object3D.scale.set(s,s,s);
+        if(dist<2.7){this.dead=true;gm.breach();this.el.setAttribute('visible',false);setTimeout(()=>{if(gm.active){this.el.setAttribute('visible',true);this.spawn();}},650);}
+      },
+      destroy(){
+        const gm=this.scene.components['game-manager'];if(!gm?.active||this.dead)return;this.dead=true;gm.hit(this);
+        this.el.setAttribute('animation__burst','property: scale; to: 2.8 2.8 2.8; dur: 180; easing: easeOutQuad');
+        this.el.setAttribute('animation__fade','property: material.opacity; to: 0; dur: 180');
+        this.spark();setTimeout(()=>{this.el.setAttribute('visible',false);setTimeout(()=>{if(gm.active){this.el.setAttribute('visible',true);this.spawn();}},220);},180);
+      },
+      spark(){
+        const p=this.el.object3D.position;for(let i=0;i<7;i++){const s=document.createElement('a-octahedron');s.setAttribute('radius',.08);s.setAttribute('color',this.data.kind===1?'#ff3cac':'#53f6ff');s.setAttribute('position',`${p.x} ${p.y} ${p.z}`);s.setAttribute('animation',`property: position; to: ${p.x+(Math.random()-.5)*4} ${p.y+(Math.random()-.5)*4} ${p.z+(Math.random()-.5)*4}; dur: 450; easing: easeOutQuad`);s.setAttribute('animation__f','property: scale; to: 0 0 0; dur: 450');this.scene.appendChild(s);setTimeout(()=>s.remove(),480);}
+      }
+    });
+  </script>
 </head>
-
 <body>
-    <a-scene cursor="rayOrigin: mouse" game-manager>
-
-        <a-assets>
-            <img id="space-bg" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/seaside.jpg"
-                crossorigin="anonymous">
-        </a-assets>
-
-        <a-entity id="ship-rig" position="0 0 0" rotation="0 0 0">
-            <a-camera position="0 0 0">
-                <a-entity position="0 0 -1">
-                    <a-ring radius-inner="0.02" radius-outer="0.025" color="#00FF66"
-                        material="shader: flat; opacity: 0.6"></a-ring>
-                    <a-ring radius-inner="0.005" radius-outer="0.008" color="#00FF66" material="shader: flat"></a-ring>
-
-                    <a-text id="scoreBoard" value="TARGET DESTROYED: 0" color="#00FF66" font="monoid" position="0 0.4 0"
-                        scale="0.2 0.2 0.2" align="center"></a-text>
-
-                    <a-text value="[A] [D] KEY TO TURN SHIP / CLICK TO FIRE" color="#FFFFFF" font="monoid"
-                        position="0 -0.4 0" scale="0.12 0.12 0.12" align="center" opacity="0.7"></a-text>
-                </a-entity>
-            </a-camera>
-
-            <a-entity laser-controls="hand: right" raycaster="objects: .enemy; far: 40"
-                line="color: #00FF66; opacity: 0.9"></a-entity>
-            <a-entity laser-controls="hand: left" raycaster="objects: .enemy; far: 40"
-                line="color: #00FF66; opacity: 0.9"></a-entity>
-
-            <a-cone position="-1.8 -0.5 -2" rotation="90 0 30" radius-bottom="0.2" radius-top="0.01" height="1.5"
-                color="#444655"></a-cone>
-            <a-cone position="1.8 -0.5 -2" rotation="90 0 -30" radius-bottom="0.2" radius-top="0.01" height="1.5"
-                color="#444655"></a-cone>
-        </a-entity>
-
-        <a-entity class="enemy" space-target position="0 2 -12" geometry="primitive: box; width: 2; height: 2; depth: 2"
-            material="color: #333; roughness: 0.2; metalness: 0.8; emissive: #FFCC00; emissiveIntensity: 0.2"
-            animation="property: rotation; to: 360 360 0; loop: true; dur: 8000; easing: linear">
-        </a-entity>
-
-        <a-entity class="enemy" space-target position="-8 -2 -15"
-            geometry="primitive: cone; radiusBottom: 1.5; height: 3"
-            material="color: #222; roughness: 0.1; metalness: 0.9; emissive: #FF00FF; emissiveIntensity: 0.2"
-            animation="property: rotation; to: 0 360 360; loop: true; dur: 6000; easing: linear">
-        </a-entity>
-
-        <a-entity class="enemy" space-target position="7 4 -8" geometry="primitive: octahedron; radius: 1.8"
-            material="color: #444; roughness: 0.5; metalness: 0.5; emissive: #00FFFF; emissiveIntensity: 0.2"
-            animation="property: rotation; to: 360 0 360; loop: true; dur: 10000; easing: linear">
-        </a-entity>
-
-        <a-entity position="0 0 0">
-            <a-sphere position="5 10 -20" radius="0.1" color="#FFF" material="shader:flat"></a-sphere>
-            <a-sphere position="-15 5 -25" radius="0.15" color="#FFF" material="shader:flat"></a-sphere>
-            <a-sphere position="12 -8 -18" radius="0.08" color="#FFF" material="shader:flat"></a-sphere>
-            <a-sphere position="-5 -12 -15" radius="0.12" color="#FFF" material="shader:flat"></a-sphere>
-            <a-sphere position="20 2 -30" radius="0.2" color="#FFCCCC" material="shader:flat"></a-sphere>
-            <a-sphere position="-22 -2 -28" radius="0.1" color="#CCFFFF" material="shader:flat"></a-sphere>
-        </a-entity>
-
-        <a-sky color="#02000a"></a-sky>
-        <a-light type="ambient" color="#333355"></a-light>
-        <a-light type="directional" color="#FFF" intensity="0.8" position="5 10 5"></a-light>
-
-    </a-scene>
+  <div class="ui">
+    <div class="brand">NEON RIFT // DEFENSE</div>
+    <div class="stats"><div class="stat"><span class="label">SCORE</span><span id="score" class="value">000000</span></div><div class="stat"><span class="label">COMBO</span><span id="combo" class="value">×0</span></div><div class="stat"><span class="label">TIME</span><span id="timer" class="value">60</span></div></div>
+    <div class="shield"><div class="shield-head"><span>CORE SHIELD</span><span>防衛システム</span></div><div class="bar"><div id="shieldFill"></div></div></div>
+    <div class="tip">照準を合わせてクリック / VRトリガーで迎撃</div><div id="flash" class="flash"></div>
+    <div id="overlay" class="overlay"><div class="panel"><div class="kicker">WEBXR ARCADE MISSION</div><h1>NEON<br>RIFT</h1><p class="subtitle">次元の裂け目から侵入する敵を60秒間迎撃せよ。<br>連続撃破でスコア倍率アップ。接近を許せばシールドが削られる。</p><p id="result"></p><button id="startButton">ミッション開始</button></div></div>
+  </div>
+  <a-scene game-manager cursor="rayOrigin: mouse; fuse: false" raycaster="objects: .enemy; far: 60" vr-mode-ui="enabled: true" renderer="colorManagement: true; antialias: true" background="color: #030512">
+    <a-entity id="rig"><a-camera position="0 1.6 0" look-controls><a-entity position="0 0 -1"><a-ring radius-inner=".018" radius-outer=".021" color="#53f6ff" material="shader:flat;opacity:.8"></a-ring><a-ring radius-inner=".003" radius-outer=".005" color="#fff" material="shader:flat"></a-ring></a-entity></a-camera>
+      <a-entity laser-controls="hand: right" raycaster="objects: .enemy; far: 60" line="color:#53f6ff;opacity:.75"></a-entity><a-entity laser-controls="hand: left" raycaster="objects: .enemy; far: 60" line="color:#ff3cac;opacity:.75"></a-entity>
+    </a-entity>
+    <a-entity class="enemy" visible="false" rift-enemy="kind:0" geometry="primitive:icosahedron;radius:1.1" material="color:#071521;metalness:.85;roughness:.18;emissive:#00d9ff;emissiveIntensity:1.2"></a-entity>
+    <a-entity class="enemy" visible="false" rift-enemy="kind:1" geometry="primitive:octahedron;radius:1.15" material="color:#1d071b;metalness:.75;roughness:.2;emissive:#ff3cac;emissiveIntensity:1.25"></a-entity>
+    <a-entity class="enemy" visible="false" rift-enemy="kind:0" geometry="primitive:dodecahedron;radius:1" material="color:#061924;metalness:.8;roughness:.2;emissive:#53f6ff;emissiveIntensity:1"></a-entity>
+    <a-entity class="enemy" visible="false" rift-enemy="kind:1" geometry="primitive:tetrahedron;radius:1.25" material="color:#21061a;metalness:.8;roughness:.2;emissive:#ff3cac;emissiveIntensity:1.2"></a-entity>
+    <a-entity class="enemy" visible="false" rift-enemy="kind:0" geometry="primitive:icosahedron;radius:.9" material="color:#071521;metalness:.9;roughness:.1;emissive:#ffd166;emissiveIntensity:1.2"></a-entity>
+    <a-entity class="enemy" visible="false" rift-enemy="kind:1" geometry="primitive:octahedron;radius:1.1" material="color:#1d071b;metalness:.75;roughness:.2;emissive:#ff3cac;emissiveIntensity:1.25"></a-entity>
+    <a-torus position="0 1.6 -18" radius="7" radius-tubular=".035" color="#263467" material="emissive:#15245e;emissiveIntensity:.8;opacity:.55;transparent:true" rotation="0 0 0" animation="property:rotation;to:0 0 360;loop:true;dur:32000;easing:linear"></a-torus>
+    <a-torus position="0 1.6 -18" radius="9" radius-tubular=".018" color="#ff3cac" material="emissive:#ff3cac;emissiveIntensity:.8;opacity:.25;transparent:true" animation="property:rotation;to:25 40 -360;loop:true;dur:44000;easing:linear"></a-torus>
+    <a-entity geometry="primitive:sphere;radius:55;segmentsWidth:32;segmentsHeight:18" material="shader:flat;color:#050817;side:back"></a-entity>
+    <a-entity id="stars">
+      <a-sphere position="-14 8 -25" radius=".08" color="#fff"></a-sphere><a-sphere position="12 11 -29" radius=".1" color="#8ff"></a-sphere><a-sphere position="-22 -5 -19" radius=".07" color="#fff"></a-sphere><a-sphere position="18 -7 -24" radius=".12" color="#f9c"></a-sphere><a-sphere position="6 15 -17" radius=".06" color="#fff"></a-sphere><a-sphere position="-8 -12 -28" radius=".09" color="#fff"></a-sphere><a-sphere position="28 4 -12" radius=".07" color="#8ff"></a-sphere><a-sphere position="-27 12 -9" radius=".08" color="#fff"></a-sphere>
+    </a-entity>
+    <a-light type="ambient" color="#35406b" intensity=".7"></a-light><a-light type="point" color="#53f6ff" intensity="1.2" position="0 2 0"></a-light>
+  </a-scene>
 </body>
-
 </html>
