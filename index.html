@@ -1,181 +1,461 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#09150e">
-  <title>STADIUM SLUGGER — WebXR Baseball</title>
-  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-  <style>
-    :root{--cream:#fff4cf;--gold:#ffc83d;--red:#ff563f;--green:#123c27;--ink:#07120c}
-    *{box-sizing:border-box} body{margin:0;overflow:hidden;background:var(--ink);font-family:system-ui,"Yu Gothic",sans-serif;user-select:none}
-    .ui{position:fixed;inset:0;z-index:10;pointer-events:none;color:#fff;text-shadow:0 2px 5px #000}
-    .brand{position:absolute;top:22px;left:25px;font-weight:1000;font-style:italic;font-size:15px;letter-spacing:.2em;color:var(--gold)}
-    .stats{position:absolute;top:18px;right:22px;display:flex;gap:8px}.stat{min-width:82px;padding:9px 12px;text-align:center;background:rgba(5,18,11,.78);border:1px solid rgba(255,244,207,.35);border-radius:7px}.label{display:block;font-size:9px;letter-spacing:.16em;color:#b9caba}.value{font-size:20px;font-weight:1000;color:var(--cream)}
-    .count{position:absolute;left:25px;bottom:24px;padding:11px 16px;border-radius:8px;background:rgba(5,18,11,.78);font-weight:900;letter-spacing:.13em}.ball-count{color:#67df8b}.strike-count{color:#ffd45c}.out-count{color:#ff735f}
-    #message{position:absolute;left:50%;top:28%;transform:translate(-50%,-50%) scale(.8);font-size:clamp(35px,8vw,76px);font-weight:1000;font-style:italic;white-space:nowrap;color:var(--gold);opacity:0;transition:opacity .15s,transform .15s;text-shadow:0 5px 0 #7b261c,0 8px 25px #000}
-    #message.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
-    .tip{position:absolute;bottom:25px;left:50%;transform:translateX(-50%);font-size:12px;letter-spacing:.1em;color:#e8f0df;white-space:nowrap}
-    .overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:auto;background:radial-gradient(circle at 50% 45%,rgba(44,92,54,.45),rgba(3,10,6,.93));transition:.3s}.overlay.hidden{opacity:0;visibility:hidden;pointer-events:none}
-    .panel{width:min(590px,91vw);padding:42px 28px;text-align:center;border:1px solid rgba(255,200,61,.55);border-radius:15px;background:linear-gradient(150deg,rgba(14,42,25,.94),rgba(5,17,10,.94));box-shadow:0 20px 80px #000,inset 0 0 40px rgba(255,200,61,.05)}
-    .kicker{font-size:10px;font-weight:900;letter-spacing:.35em;color:#79e29c}h1{margin:10px 0;font-size:clamp(42px,10vw,76px);line-height:.88;font-style:italic;letter-spacing:-.05em;color:var(--cream);text-shadow:4px 4px 0 #b22e23}.subtitle{margin:20px auto 25px;max-width:450px;font-size:13px;line-height:1.8;color:#c7d8c7}.rules{color:#ffe088;font-weight:800}.result{display:none;margin:0 0 20px;color:var(--gold);font-weight:900;line-height:1.7}
-    button{border:0;border-radius:7px;padding:14px 36px;background:linear-gradient(180deg,#ffe274,#ffb71b);color:#241604;font-weight:1000;letter-spacing:.12em;cursor:pointer;box-shadow:0 5px 0 #9f5711,0 10px 28px #000;transition:.15s}button:hover{transform:translateY(-2px)}
-    @media(max-width:600px){.brand{top:12px;left:12px;font-size:11px}.stats{top:10px;right:10px}.stat{min-width:61px;padding:6px}.value{font-size:16px}.tip{bottom:68px;font-size:10px}.count{left:12px;bottom:13px}}
-  </style>
-  <script>
-    AFRAME.registerComponent('baseball-game',{
-      init(){
-        this.active=false;this.score=0;this.hits=0;this.homeRuns=0;this.strikes=0;this.outs=0;this.pitches=0;this.nextPitch=0;this.audio=null;
-        this.ball=document.querySelector('#ball');this.bat=document.querySelector('#bat');this.pitcher=document.querySelector('#pitcher');
-        this.message=document.querySelector('#message');this.overlay=document.querySelector('#overlay');this.button=document.querySelector('#startButton');
-        this.button.addEventListener('click',e=>{e.stopPropagation();this.start()});
-        window.addEventListener('keydown',e=>{if((e.code==='Space'||e.code==='Enter')&&!e.repeat){e.preventDefault();this.swing()}});
-        window.addEventListener('pointerdown',e=>{if(this.active&&!e.target.closest('.overlay'))this.swing()});
-        document.querySelectorAll('[hand-controls]').forEach(c=>{c.addEventListener('triggerdown',()=>this.swing());c.addEventListener('gripdown',()=>this.swing())});
-        this.xrMenu=document.querySelector('#xrMenu');
-        this.el.addEventListener('enter-vr',()=>{this.overlay.classList.add('hidden');this.xrMenu.setAttribute('visible',!this.active)});
-        this.el.addEventListener('exit-vr',()=>{this.xrMenu.setAttribute('visible',false);if(!this.active)this.overlay.classList.remove('hidden')});
-        this.updateUI();
-      },
-      start(){
-        this.active=true;this.score=0;this.hits=0;this.homeRuns=0;this.strikes=0;this.outs=0;this.pitches=0;this.nextPitch=700;this.ball.components.pitch.reset();this.overlay.classList.add('hidden');this.xrMenu.setAttribute('visible',false);
-        try{this.audio=this.audio||new(window.AudioContext||window.webkitAudioContext)();this.audio.resume()}catch(e){}this.updateUI();this.callout('PLAY BALL!',900);
-      },
-      tick(t,dt){if(!this.active)return;if(this.nextPitch>0){this.nextPitch-=dt;if(this.nextPitch<=0)this.ball.components.pitch.throwBall()}},
-      swing(){
-        if(!this.active||this.el.is('vr-mode')||this.bat.components['bat-swing'].swinging)return;
-        this.bat.components['bat-swing'].go();this.tone(115,.07,'triangle');
-        const p=this.ball.components.pitch;if(!p.flying)return;
-        const pos=this.ball.object3D.position;
-        if(pos.z>-1.15&&pos.z<.42&&pos.y>.28&&pos.y<2.7&&Math.abs(pos.x)<1.28){
-          const center=Math.abs(pos.z+.33)+Math.abs(pos.y-1.16)*.35+Math.abs(pos.x)*.3;
-          this.contactHit(center);
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#09150e">
+    <title>STADIUM SLUGGER — WebXR Baseball</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <style>
+        :root {
+            --cream: #fff4cf;
+            --gold: #ffc83d;
+            --red: #ff563f;
+            --green: #123c27;
+            --ink: #07120c
         }
-      },
-      contactHit(quality){const p=this.ball.components.pitch;if(!p.flying||p.batted)return;p.hit(quality);this.hits++;this.score+=quality<.34?1000:quality<.7?500:250;if(quality<.34)this.homeRuns++;this.callout(quality<.34?'HOME RUN!':quality<.7?'NICE HIT!':'HIT!',950);this.tone(quality<.34?520:360,.18,'square');this.updateUI()},
-      pitchDone(result){
-        if(!this.active)return;this.pitches++;
-        if(result==='strike'){this.strikes++;this.callout('STRIKE!',650);this.tone(80,.14,'sawtooth');if(this.strikes>=3){this.outs++;this.strikes=0;setTimeout(()=>this.callout('OUT!',700),500)}}
-        else if(result==='foul'){this.strikes=Math.min(2,this.strikes+1);this.callout('FOUL',650)}
-        if(this.outs>=3||this.pitches>=12){setTimeout(()=>this.end(),900);return}this.nextPitch=1050+Math.random()*2100;this.updateUI();
-      },
-      end(){if(!this.active)return;this.active=false;this.ball.components.pitch.reset();document.querySelector('#result').style.display='block';document.querySelector('#result').innerHTML=`試合終了！<br>SCORE ${this.score.toLocaleString()} ／ ${this.hits} HITS ／ ${this.homeRuns} HR`;this.button.textContent='もう一度プレイ';if(this.el.is('vr-mode')){this.xrMenu.setAttribute('visible',true);document.querySelector('#xrResult').setAttribute('value',`SCORE ${this.score}  HITS ${this.hits}  HR ${this.homeRuns}`)}else this.overlay.classList.remove('hidden')},
-      callout(s,ms){this.message.textContent=s;this.message.classList.add('show');clearTimeout(this.msgTimer);this.msgTimer=setTimeout(()=>this.message.classList.remove('show'),ms)},
-      tone(f,d,type){if(!this.audio)return;const o=this.audio.createOscillator(),g=this.audio.createGain();o.type=type;o.frequency.setValueAtTime(f,this.audio.currentTime);g.gain.setValueAtTime(.045,this.audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+d);o.connect(g).connect(this.audio.destination);o.start();o.stop(this.audio.currentTime+d)},
-      updateUI(){document.querySelector('#score').textContent=String(this.score).padStart(5,'0');document.querySelector('#hits').textContent=this.hits;document.querySelector('#hr').textContent=this.homeRuns;document.querySelector('#strikes').textContent='●'.repeat(this.strikes)+'○'.repeat(2-this.strikes);document.querySelector('#outs').textContent='●'.repeat(this.outs)+'○'.repeat(Math.max(0,3-this.outs))}
-    });
 
-    AFRAME.registerComponent('pitch',{
-      init(){this.flying=false;this.batted=false;this.winding=false;this.crossedPlate=false;this.v=new THREE.Vector3();this.startPos=new THREE.Vector3();this.flightTime=0;this.reset()},
-      reset(){this.flying=false;this.batted=false;this.winding=false;this.crossedPlate=false;clearTimeout(this.releaseTimer);this.el.setAttribute('visible',false)},
-      throwBall(){
-        const gm=this.el.sceneEl.components['baseball-game'];if(!gm.active)return;
-        this.winding=true;gm.callout('GET READY',430);gm.pitcher.removeAttribute('animation__throw');gm.pitcher.setAttribute('animation__throw','property:rotation;from:0 0 0;to:-24 0 10;dir:alternate;dur:330;loop:1;easing:easeInOutQuad');
-        this.releaseTimer=setTimeout(()=>{
-          // Uniform random target across the visible strike zone: inside/outside
-          // and high/low pitches all have the same chance.
-          if(!gm.active)return;const targetX=THREE.MathUtils.lerp(-.40,.40,Math.random()),targetY=THREE.MathUtils.lerp(.80,1.48,Math.random()),speed=22+Math.random()*4,distance=15.9,time=distance/speed;
-          this.startPos.set(-.32,2.02,-15.55);this.el.object3D.position.copy(this.startPos);this.v.set((targetX+.32)/time,(targetY-2.02)/time,speed);this.flightTime=0;this.flying=true;this.winding=false;this.batted=false;this.crossedPlate=false;this.el.setAttribute('visible',true);gm.tone(145,.045,'triangle');
-        },560);
-      },
-      hit(quality){
-        this.batted=true;const p=this.el.object3D.position;this.v.set(-p.x*1.8+(Math.random()-.5)*2.5,quality<.34?10.5:7.5,quality<.34?-18:-13-Math.random()*3);this.spin=quality<.34?.025:.04;
-      },
-      tick(t,dt){
-        if(!this.flying)return;const d=Math.min(dt/1000,.035),p=this.el.object3D.position;
-        if(this.batted){p.addScaledVector(this.v,d);this.v.y-=9.8*d}else{this.flightTime+=d;p.copy(this.startPos).addScaledVector(this.v,this.flightTime)}
-        this.el.object3D.rotation.x+=d*18;this.el.object3D.rotation.z+=d*11;
-        const gm=this.el.sceneEl.components['baseball-game'];
-        if(this.batted){if(p.y<.08||p.z<-55){this.flying=false;this.el.setAttribute('visible',false);gm.pitchDone('hit')}}
-        else{
-          if(!this.crossedPlate&&p.z>=.35){this.crossedPlate=true}
-          if(this.crossedPlate&&p.z>2.8){this.flying=false;this.el.setAttribute('visible',false);gm.tone(105,.05,'triangle');gm.pitchDone('strike')}
-          else if(!this.crossedPlate&&p.y<.05){this.flying=false;this.el.setAttribute('visible',false);gm.nextPitch=650}
+        * {
+            box-sizing: border-box
         }
-      }
-    });
 
-    AFRAME.registerComponent('bat-swing',{
-      init(){this.swinging=false;this.rest=new THREE.Euler(0,0,THREE.MathUtils.degToRad(-28));this.hand=document.querySelector('#rightHand');this.lastTip=new THREE.Vector3();this.tip=new THREE.Vector3();this.base=new THREE.Vector3();this.handPos=new THREE.Vector3();this.handQuat=new THREE.Quaternion();this.offsetQuat=new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI/2,0,0));this.ready=false},
-      go(){this.swinging=true;this.elapsed=0},
-      tick(t,dt){
-        const gm=this.el.sceneEl.components['baseball-game'];
-        if(this.el.sceneEl.is('vr-mode')&&this.hand){
-          this.hand.object3D.getWorldPosition(this.handPos);this.hand.object3D.getWorldQuaternion(this.handQuat);this.el.object3D.position.copy(this.handPos);this.el.object3D.quaternion.copy(this.handQuat).multiply(this.offsetQuat);this.el.object3D.updateMatrixWorld(true);
-          // The controller pose sits at the middle of the taped grip.  Collision
-          // follows the actual bat axis from the knob to the end of the barrel.
-          this.base.set(0,-.25,0).applyMatrix4(this.el.object3D.matrixWorld);this.tip.set(0,1.48,0).applyMatrix4(this.el.object3D.matrixWorld);
-          const speed=this.ready&&dt?this.tip.distanceTo(this.lastTip)/(dt/1000):0;
-          const pitch=gm?.ball.components.pitch;if(gm?.active&&pitch?.flying&&!pitch.batted&&speed>1.25){
-            const bp=gm.ball.object3D.position,seg=new THREE.Vector3().subVectors(this.tip,this.base),toBall=new THREE.Vector3().subVectors(bp,this.base);const u=THREE.MathUtils.clamp(toBall.dot(seg)/seg.lengthSq(),0,1);const near=this.base.clone().addScaledVector(seg,u);
-            if(near.distanceTo(bp)<.24){const quality=THREE.MathUtils.clamp(.22+(4.5-speed)*.09,0.12,.8);gm.contactHit(quality)}
-          }
-          this.lastTip.copy(this.tip);this.ready=true;return;
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: var(--ink);
+            font-family: system-ui, "Yu Gothic", sans-serif;
+            user-select: none
         }
-        this.ready=false;if(!this.swinging)return;this.elapsed+=dt;const u=Math.min(1,this.elapsed/260),a=-28+205*Math.sin(u*Math.PI*.86);this.el.object3D.rotation.set(0,THREE.MathUtils.degToRad(-18+45*u),THREE.MathUtils.degToRad(a));if(u>=1){this.swinging=false;this.el.object3D.rotation.set(0,0,THREE.MathUtils.degToRad(-28))}
-      }
-    });
 
-    AFRAME.registerComponent('xr-start',{
-      init(){
-        this.el.addEventListener('mouseenter',()=>this.el.setAttribute('material','color','#ffe477'));
-        this.el.addEventListener('mouseleave',()=>this.el.setAttribute('material','color','#ffc83d'));
-        this.el.addEventListener('click',e=>{e.stopPropagation();this.el.sceneEl.components['baseball-game'].start()});
-      }
-    });
-  </script>
+        .ui {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            pointer-events: none;
+            color: #fff;
+            text-shadow: 0 2px 5px #000
+        }
+
+        .brand {
+            position: absolute;
+            top: 22px;
+            left: 25px;
+            font-weight: 1000;
+            font-style: italic;
+            font-size: 15px;
+            letter-spacing: .2em;
+            color: var(--gold)
+        }
+
+        .stats {
+            position: absolute;
+            top: 18px;
+            right: 22px;
+            display: flex;
+            gap: 8px
+        }
+
+        .stat {
+            min-width: 82px;
+            padding: 9px 12px;
+            text-align: center;
+            background: rgba(5, 18, 11, .78);
+            border: 1px solid rgba(255, 244, 207, .35);
+            border-radius: 7px
+        }
+
+        .label {
+            display: block;
+            font-size: 9px;
+            letter-spacing: .16em;
+            color: #b9caba
+        }
+
+        .value {
+            font-size: 20px;
+            font-weight: 1000;
+            color: var(--cream)
+        }
+
+        .count {
+            position: absolute;
+            left: 25px;
+            bottom: 24px;
+            padding: 11px 16px;
+            border-radius: 8px;
+            background: rgba(5, 18, 11, .78);
+            font-weight: 900;
+            letter-spacing: .13em
+        }
+
+        .ball-count {
+            color: #67df8b
+        }
+
+        .strike-count {
+            color: #ffd45c
+        }
+
+        .out-count {
+            color: #ff735f
+        }
+
+        #message {
+            position: absolute;
+            left: 50%;
+            top: 28%;
+            transform: translate(-50%, -50%) scale(.8);
+            font-size: clamp(35px, 8vw, 76px);
+            font-weight: 1000;
+            font-style: italic;
+            white-space: nowrap;
+            color: var(--gold);
+            opacity: 0;
+            transition: opacity .15s, transform .15s;
+            text-shadow: 0 5px 0 #7b261c, 0 8px 25px #000
+        }
+
+        #message.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1)
+        }
+
+        .tip {
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            letter-spacing: .1em;
+            color: #e8f0df;
+            white-space: nowrap
+        }
+
+        .overlay {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            pointer-events: auto;
+            background: radial-gradient(circle at 50% 45%, rgba(44, 92, 54, .45), rgba(3, 10, 6, .93));
+            transition: .3s
+        }
+
+        .overlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none
+        }
+
+        .panel {
+            width: min(590px, 91vw);
+            padding: 42px 28px;
+            text-align: center;
+            border: 1px solid rgba(255, 200, 61, .55);
+            border-radius: 15px;
+            background: linear-gradient(150deg, rgba(14, 42, 25, .94), rgba(5, 17, 10, .94));
+            box-shadow: 0 20px 80px #000, inset 0 0 40px rgba(255, 200, 61, .05)
+        }
+
+        .kicker {
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: .35em;
+            color: #79e29c
+        }
+
+        h1 {
+            margin: 10px 0;
+            font-size: clamp(42px, 10vw, 76px);
+            line-height: .88;
+            font-style: italic;
+            letter-spacing: -.05em;
+            color: var(--cream);
+            text-shadow: 4px 4px 0 #b22e23
+        }
+
+        .subtitle {
+            margin: 20px auto 25px;
+            max-width: 450px;
+            font-size: 13px;
+            line-height: 1.8;
+            color: #c7d8c7
+        }
+
+        .rules {
+            color: #ffe088;
+            font-weight: 800
+        }
+
+        .result {
+            display: none;
+            margin: 0 0 20px;
+            color: var(--gold);
+            font-weight: 900;
+            line-height: 1.7
+        }
+
+        button {
+            border: 0;
+            border-radius: 7px;
+            padding: 14px 36px;
+            background: linear-gradient(180deg, #ffe274, #ffb71b);
+            color: #241604;
+            font-weight: 1000;
+            letter-spacing: .12em;
+            cursor: pointer;
+            box-shadow: 0 5px 0 #9f5711, 0 10px 28px #000;
+            transition: .15s
+        }
+
+        button:hover {
+            transform: translateY(-2px)
+        }
+
+        @media(max-width:600px) {
+            .brand {
+                top: 12px;
+                left: 12px;
+                font-size: 11px
+            }
+
+            .stats {
+                top: 10px;
+                right: 10px
+            }
+
+            .stat {
+                min-width: 61px;
+                padding: 6px
+            }
+
+            .value {
+                font-size: 16px
+            }
+
+            .tip {
+                bottom: 68px;
+                font-size: 10px
+            }
+
+            .count {
+                left: 12px;
+                bottom: 13px
+            }
+        }
+    </style>
+    <script>
+        AFRAME.registerComponent('baseball-game', {
+            init() {
+                this.active = false; this.score = 0; this.hits = 0; this.homeRuns = 0; this.strikes = 0; this.outs = 0; this.pitches = 0; this.nextPitch = 0; this.audio = null;
+                this.ball = document.querySelector('#ball'); this.bat = document.querySelector('#bat'); this.pitcher = document.querySelector('#pitcher');
+                this.message = document.querySelector('#message'); this.overlay = document.querySelector('#overlay'); this.button = document.querySelector('#startButton');
+                this.button.addEventListener('click', e => { e.stopPropagation(); this.start() });
+                window.addEventListener('keydown', e => { if ((e.code === 'Space' || e.code === 'Enter') && !e.repeat) { e.preventDefault(); this.swing() } });
+                window.addEventListener('pointerdown', e => { if (this.active && !e.target.closest('.overlay')) this.swing() });
+                document.querySelectorAll('[hand-controls]').forEach(c => { c.addEventListener('triggerdown', () => this.swing()); c.addEventListener('gripdown', () => this.swing()) });
+                this.xrMenu = document.querySelector('#xrMenu');
+                this.el.addEventListener('enter-vr', () => { this.overlay.classList.add('hidden'); this.xrMenu.setAttribute('visible', !this.active) });
+                this.el.addEventListener('exit-vr', () => { this.xrMenu.setAttribute('visible', false); if (!this.active) this.overlay.classList.remove('hidden') });
+                this.updateUI();
+            },
+            start() {
+                this.active = true; this.score = 0; this.hits = 0; this.homeRuns = 0; this.strikes = 0; this.outs = 0; this.pitches = 0; this.nextPitch = 700; this.ball.components.pitch.reset(); this.overlay.classList.add('hidden'); this.xrMenu.setAttribute('visible', false);
+                try { this.audio = this.audio || new (window.AudioContext || window.webkitAudioContext)(); this.audio.resume() } catch (e) { } this.updateUI(); this.callout('PLAY BALL!', 900);
+            },
+            tick(t, dt) { if (!this.active) return; if (this.nextPitch > 0) { this.nextPitch -= dt; if (this.nextPitch <= 0) this.ball.components.pitch.throwBall() } },
+            swing() {
+                if (!this.active || this.el.is('vr-mode') || this.bat.components['bat-swing'].swinging) return;
+                this.bat.components['bat-swing'].go(); this.tone(115, .07, 'triangle');
+                const p = this.ball.components.pitch; if (!p.flying) return;
+                const pos = this.ball.object3D.position;
+                if (pos.z > -1.15 && pos.z < .42 && pos.y > .28 && pos.y < 2.7 && Math.abs(pos.x) < 1.28) {
+                    const center = Math.abs(pos.z + .33) + Math.abs(pos.y - 1.16) * .35 + Math.abs(pos.x) * .3;
+                    this.contactHit(center);
+                }
+            },
+            contactHit(quality) { const p = this.ball.components.pitch; if (!p.flying || p.batted) return; p.hit(quality); this.hits++; this.score += quality < .34 ? 1000 : quality < .7 ? 500 : 250; if (quality < .34) this.homeRuns++; this.callout(quality < .34 ? 'HOME RUN!' : quality < .7 ? 'NICE HIT!' : 'HIT!', 950); this.tone(quality < .34 ? 520 : 360, .18, 'square'); this.updateUI() },
+            pitchDone(result) {
+                if (!this.active) return; this.pitches++;
+                if (result === 'strike') { this.strikes++; this.callout('STRIKE!', 650); this.tone(80, .14, 'sawtooth'); if (this.strikes >= 3) { this.outs++; this.strikes = 0; setTimeout(() => this.callout('OUT!', 700), 500) } }
+                else if (result === 'foul') { this.strikes = Math.min(2, this.strikes + 1); this.callout('FOUL', 650) }
+                if (this.outs >= 3 || this.pitches >= 12) { setTimeout(() => this.end(), 900); return } this.nextPitch = 1050 + Math.random() * 2100; this.updateUI();
+            },
+            end() { if (!this.active) return; this.active = false; this.ball.components.pitch.reset(); document.querySelector('#result').style.display = 'block'; document.querySelector('#result').innerHTML = `試合終了！<br>SCORE ${this.score.toLocaleString()} ／ ${this.hits} HITS ／ ${this.homeRuns} HR`; this.button.textContent = 'もう一度プレイ'; if (this.el.is('vr-mode')) { this.xrMenu.setAttribute('visible', true); document.querySelector('#xrResult').setAttribute('value', `SCORE ${this.score}  HITS ${this.hits}  HR ${this.homeRuns}`) } else this.overlay.classList.remove('hidden') },
+            callout(s, ms) { this.message.textContent = s; this.message.classList.add('show'); clearTimeout(this.msgTimer); this.msgTimer = setTimeout(() => this.message.classList.remove('show'), ms) },
+            tone(f, d, type) { if (!this.audio) return; const o = this.audio.createOscillator(), g = this.audio.createGain(); o.type = type; o.frequency.setValueAtTime(f, this.audio.currentTime); g.gain.setValueAtTime(.045, this.audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, this.audio.currentTime + d); o.connect(g).connect(this.audio.destination); o.start(); o.stop(this.audio.currentTime + d) },
+            updateUI() { document.querySelector('#score').textContent = String(this.score).padStart(5, '0'); document.querySelector('#hits').textContent = this.hits; document.querySelector('#hr').textContent = this.homeRuns; document.querySelector('#strikes').textContent = '●'.repeat(this.strikes) + '○'.repeat(2 - this.strikes); document.querySelector('#outs').textContent = '●'.repeat(this.outs) + '○'.repeat(Math.max(0, 3 - this.outs)) }
+        });
+
+        AFRAME.registerComponent('pitch', {
+            init() { this.flying = false; this.batted = false; this.winding = false; this.crossedPlate = false; this.v = new THREE.Vector3(); this.startPos = new THREE.Vector3(); this.flightTime = 0; this.reset() },
+            reset() { this.flying = false; this.batted = false; this.winding = false; this.crossedPlate = false; clearTimeout(this.releaseTimer); this.el.setAttribute('visible', false) },
+            throwBall() {
+                const gm = this.el.sceneEl.components['baseball-game']; if (!gm.active) return;
+                this.winding = true; gm.callout('GET READY', 430); gm.pitcher.removeAttribute('animation__throw'); gm.pitcher.setAttribute('animation__throw', 'property:rotation;from:0 0 0;to:-24 0 10;dir:alternate;dur:330;loop:1;easing:easeInOutQuad');
+                this.releaseTimer = setTimeout(() => {
+                    // Uniform random target across the visible strike zone: inside/outside
+                    // and high/low pitches all have the same chance.
+                    if (!gm.active) return; const targetX = THREE.MathUtils.lerp(-.40, .40, Math.random()), targetY = THREE.MathUtils.lerp(.80, 1.48, Math.random()), speed = 22 + Math.random() * 4, distance = 15.9, time = distance / speed;
+                    this.startPos.set(-.32, 2.02, -15.55); this.el.object3D.position.copy(this.startPos); this.v.set((targetX + .32) / time, (targetY - 2.02) / time, speed); this.flightTime = 0; this.flying = true; this.winding = false; this.batted = false; this.crossedPlate = false; this.el.setAttribute('visible', true); gm.tone(145, .045, 'triangle');
+                }, 560);
+            },
+            hit(quality) {
+                this.batted = true; const p = this.el.object3D.position; this.v.set(-p.x * 1.8 + (Math.random() - .5) * 2.5, quality < .34 ? 10.5 : 7.5, quality < .34 ? -18 : -13 - Math.random() * 3); this.spin = quality < .34 ? .025 : .04;
+            },
+            tick(t, dt) {
+                if (!this.flying) return; const d = Math.min(dt / 1000, .035), p = this.el.object3D.position;
+                if (this.batted) { p.addScaledVector(this.v, d); this.v.y -= 9.8 * d } else { this.flightTime += d; p.copy(this.startPos).addScaledVector(this.v, this.flightTime) }
+                this.el.object3D.rotation.x += d * 18; this.el.object3D.rotation.z += d * 11;
+                const gm = this.el.sceneEl.components['baseball-game'];
+                if (this.batted) { if (p.y < .08 || p.z < -55) { this.flying = false; this.el.setAttribute('visible', false); gm.pitchDone('hit') } }
+                else {
+                    if (!this.crossedPlate && p.z >= .35) { this.crossedPlate = true }
+                    if (this.crossedPlate && p.z > 2.8) { this.flying = false; this.el.setAttribute('visible', false); gm.tone(105, .05, 'triangle'); gm.pitchDone('strike') }
+                    else if (!this.crossedPlate && p.y < .05) { this.flying = false; this.el.setAttribute('visible', false); gm.nextPitch = 650 }
+                }
+            }
+        });
+
+        AFRAME.registerComponent('bat-swing', {
+            init() { this.swinging = false; this.rest = new THREE.Euler(0, 0, THREE.MathUtils.degToRad(-28)); this.hand = document.querySelector('#rightHand'); this.lastTip = new THREE.Vector3(); this.tip = new THREE.Vector3(); this.base = new THREE.Vector3(); this.handPos = new THREE.Vector3(); this.handQuat = new THREE.Quaternion(); this.offsetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)); this.ready = false },
+            go() { this.swinging = true; this.elapsed = 0 },
+            tick(t, dt) {
+                const gm = this.el.sceneEl.components['baseball-game'];
+                if (this.el.sceneEl.is('vr-mode') && this.hand) {
+                    this.hand.object3D.getWorldPosition(this.handPos); this.hand.object3D.getWorldQuaternion(this.handQuat); this.el.object3D.position.copy(this.handPos); this.el.object3D.quaternion.copy(this.handQuat).multiply(this.offsetQuat); this.el.object3D.updateMatrixWorld(true);
+                    // The controller pose sits at the middle of the taped grip.  Collision
+                    // follows the actual bat axis from the knob to the end of the barrel.
+                    this.base.set(0, -.25, 0).applyMatrix4(this.el.object3D.matrixWorld); this.tip.set(0, 1.48, 0).applyMatrix4(this.el.object3D.matrixWorld);
+                    const speed = this.ready && dt ? this.tip.distanceTo(this.lastTip) / (dt / 1000) : 0;
+                    const pitch = gm?.ball.components.pitch; if (gm?.active && pitch?.flying && !pitch.batted && speed > 1.25) {
+                        const bp = gm.ball.object3D.position, seg = new THREE.Vector3().subVectors(this.tip, this.base), toBall = new THREE.Vector3().subVectors(bp, this.base); const u = THREE.MathUtils.clamp(toBall.dot(seg) / seg.lengthSq(), 0, 1); const near = this.base.clone().addScaledVector(seg, u);
+                        if (near.distanceTo(bp) < .24) { const quality = THREE.MathUtils.clamp(.22 + (4.5 - speed) * .09, 0.12, .8); gm.contactHit(quality) }
+                    }
+                    this.lastTip.copy(this.tip); this.ready = true; return;
+                }
+                this.ready = false; if (!this.swinging) return; this.elapsed += dt; const u = Math.min(1, this.elapsed / 260), a = -28 + 205 * Math.sin(u * Math.PI * .86); this.el.object3D.rotation.set(0, THREE.MathUtils.degToRad(-18 + 45 * u), THREE.MathUtils.degToRad(a)); if (u >= 1) { this.swinging = false; this.el.object3D.rotation.set(0, 0, THREE.MathUtils.degToRad(-28)) }
+            }
+        });
+
+        AFRAME.registerComponent('xr-start', {
+            init() {
+                this.el.addEventListener('mouseenter', () => this.el.setAttribute('material', 'color', '#ffe477'));
+                this.el.addEventListener('mouseleave', () => this.el.setAttribute('material', 'color', '#ffc83d'));
+                this.el.addEventListener('click', e => { e.stopPropagation(); this.el.sceneEl.components['baseball-game'].start() });
+            }
+        });
+    </script>
 </head>
+
 <body>
-  <div class="ui">
-    <div class="brand">STADIUM SLUGGER</div>
-    <div class="stats"><div class="stat"><span class="label">SCORE</span><span id="score" class="value">00000</span></div><div class="stat"><span class="label">HITS</span><span id="hits" class="value">0</span></div><div class="stat"><span class="label">HOME RUN</span><span id="hr" class="value">0</span></div></div>
-    <div class="count"><span class="strike-count">S <b id="strikes">○○</b></span>　<span class="out-count">O <b id="outs">○○○</b></span></div>
-    <div id="message"></div><div class="tip">クリック / スペース / VRトリガーでスイング</div>
-    <div id="overlay" class="overlay"><div class="panel"><div class="kicker">WEBXR BATTING CHALLENGE</div><h1>STADIUM<br>SLUGGER</h1><p class="subtitle">投手がランダムなタイミングと球速で投げてきます。<br>ボールをよく見て、ホームベースの上でスイング！<br><span class="rules">全12球、または3アウトで試合終了</span></p><p id="result" class="result"></p><button id="startButton">プレイボール！</button></div></div>
-  </div>
-  <a-scene baseball-game cursor="rayOrigin:mouse" raycaster="objects:.clickable" vr-mode-ui="enabled:true" renderer="colorManagement:true;antialias:true;physicallyCorrectLights:true" background="color:#8cc8e8">
-    <a-assets><a-mixin id="white" material="color:#eee;roughness:.85"></a-mixin></a-assets>
-    <!-- Right-handed view: a small parallel offset, still looking straight downfield. -->
-    <a-entity id="rig" position="-.55 0 2.1" rotation="0 0 0">
-      <a-camera position="0 1.65 0" look-controls wasd-controls="enabled:false"><a-entity cursor="fuse:true;fuseTimeout:1200" raycaster="objects:.clickable;far:12" position="0 0 -1"><a-ring radius-inner=".012" radius-outer=".018" color="#fff" material="shader:flat"></a-ring></a-entity></a-camera>
-      <a-entity id="rightHand" hand-controls="hand:right;handModelStyle:lowPoly;color:#c48b62" laser-controls="hand:right" raycaster="objects:.clickable;far:12" line="color:#ffc83d"></a-entity><a-entity id="leftHand" hand-controls="hand:left;handModelStyle:lowPoly;color:#c48b62" laser-controls="hand:left" raycaster="objects:.clickable;far:12" line="color:#ffc83d"></a-entity>
-    </a-entity>
-    <a-entity id="xrMenu" visible="false" position="-.55 1.7 -.4" rotation="0 0 0">
-      <a-plane width="3.25" height="2" color="#0b2918" material="opacity:.96;roughness:.8"></a-plane>
-      <a-text value="STADIUM SLUGGER" align="center" color="#fff4cf" width="4.8" position="0 .57 .015"></a-text>
-      <a-text value="Trigger or gaze to start" align="center" color="#b9d8bd" width="3.1" position="0 .18 .015"></a-text>
-      <a-plane class="clickable" xr-start width="1.65" height=".48" color="#ffc83d" position="0 -.28 .035" material="shader:flat"></a-plane>
-      <a-text value="PLAY BALL!" align="center" color="#281600" width="2.5" position="0 -.32 .055"></a-text>
-      <a-text id="xrResult" value="" align="center" color="#ffe088" width="3.2" position="0 -.72 .02"></a-text>
-    </a-entity>
-    <a-entity id="bat" bat-swing position="-.82 1.22 .25" rotation="0 0 28">
-      <a-entity position="0 -.18 0">
-      <!-- regulation-sized wooden bat: knob, taped handle, tapered neck and barrel -->
-      <a-cylinder radius=".075" height=".055" position="0 -.03 0" color="#211711" material="roughness:.9" geometry="segmentsRadial:24"></a-cylinder>
-      <a-sphere radius=".087" scale="1 .45 1" position="0 -.07 0" color="#211711" material="roughness:.9"></a-sphere>
-      <a-cylinder radius=".038" height=".43" position="0 .21 0" color="#29231f" material="roughness:1" geometry="segmentsRadial:24"></a-cylinder>
-      <a-torus radius=".041" radius-tubular=".006" position="0 .04 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .12 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .20 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .28 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .36 0" rotation="90 0 0" color="#b8aa91"></a-torus>
-      <a-cone radius-bottom=".039" radius-top=".09" height=".54" position="0 .695 0" color="#bd7635" material="roughness:.58;metalness:.02" geometry="segmentsRadial:32"></a-cone>
-      <a-cylinder radius=".09" height=".69" position="0 1.31 0" color="#d8954c" material="roughness:.52;metalness:.02" geometry="segmentsRadial:32"></a-cylinder>
-      <a-sphere radius=".09" scale="1 .3 1" position="0 1.655 0" color="#d8954c" material="roughness:.52"></a-sphere>
-      <a-ring radius-inner=".068" radius-outer=".075" position="0 1.18 .064" rotation="90 0 0" color="#6f3c1d" material="shader:flat;side:double"></a-ring>
-      </a-entity>
-    </a-entity>
-    <a-entity id="ball" pitch visible="false">
-      <a-sphere radius=".14" color="#fffdf4" material="roughness:.72"></a-sphere>
-      <a-torus radius=".105" radius-tubular=".006" rotation="18 12 0" color="#b52d2d" material="shader:flat"></a-torus><a-torus radius=".105" radius-tubular=".006" rotation="-18 12 0" color="#b52d2d" material="shader:flat"></a-torus>
-      <a-cone radius-bottom=".075" radius-top=".01" height=".6" position="0 0 -.34" rotation="-90 0 0" color="#ffffff" material="shader:flat;transparent:true;opacity:.2"></a-cone>
-    </a-entity>
-    <a-entity id="pitcher" position="0 0 -16"><a-cylinder radius=".3" height="1.15" position="0 .85 0" color="#f1eee4"></a-cylinder><a-sphere radius=".25" position="0 1.65 0" color="#b97953"></a-sphere><a-cylinder radius=".27" height=".16" position="0 1.86 0" color="#cf3434"></a-cylinder><a-box width=".85" height=".08" depth=".2" position="0 .06 .15" color="#fff"></a-box></a-entity>
-    <a-plane position="0 .012 0" rotation="-90 0 0" width="80" height="90" color="#216b37" material="roughness:1"></a-plane>
-    <a-plane position="0 .018 -13" rotation="-90 0 45" width="16" height="16" color="#9b683a"></a-plane>
-    <a-plane position="0 .026 .18" rotation="-90 0 0" width=".75" height=".75" color="#fff" geometry="primitive:triangle;vertexA:-.52 .45 0;vertexB:.52 .45 0;vertexC:0 -.45 0"></a-plane>
-    <a-entity position="0 1.14 .34">
-      <a-box width=".9" height=".018" depth=".018" position="0 .39 0" color="#ffe36b" material="shader:flat;opacity:.65;transparent:true"></a-box><a-box width=".9" height=".018" depth=".018" position="0 -.39 0" color="#ffe36b" material="shader:flat;opacity:.65;transparent:true"></a-box><a-box width=".018" height=".8" depth=".018" position="-.44 0 0" color="#ffe36b" material="shader:flat;opacity:.65;transparent:true"></a-box><a-box width=".018" height=".8" depth=".018" position=".44 0 0" color="#ffe36b" material="shader:flat;opacity:.65;transparent:true"></a-box>
-    </a-entity>
-    <a-box position="-13 1.2 -28" width=".25" height="2.4" depth="55" color="#eadbba" rotation="0 -25 0"></a-box><a-box position="13 1.2 -28" width=".25" height="2.4" depth="55" color="#eadbba" rotation="0 25 0"></a-box>
-    <a-entity position="0 0 -43"><a-cylinder radius="32" height="5" open-ended="true" side="double" color="#17482b" material="side:double" geometry="thetaLength:180;thetaStart:0" rotation="0 90 0"></a-cylinder></a-entity>
-    <a-light type="ambient" color="#d9edff" intensity="1.1"></a-light><a-light type="directional" color="#fff6d7" intensity="1.6" position="-8 15 6"></a-light>
-  </a-scene>
+    <div class="ui">
+        <div class="brand">STADIUM SLUGGER</div>
+        <div class="stats">
+            <div class="stat"><span class="label">SCORE</span><span id="score" class="value">00000</span></div>
+            <div class="stat"><span class="label">HITS</span><span id="hits" class="value">0</span></div>
+            <div class="stat"><span class="label">HOME RUN</span><span id="hr" class="value">0</span></div>
+        </div>
+        <div class="count"><span class="strike-count">S <b id="strikes">○○</b></span>　<span class="out-count">O <b
+                    id="outs">○○○</b></span></div>
+        <div id="message"></div>
+        <div class="tip">クリック / スペース / VRトリガーでスイング</div>
+        <div id="overlay" class="overlay">
+            <div class="panel">
+                <div class="kicker">WEBXR BATTING CHALLENGE</div>
+                <h1>STADIUM<br>SLUGGER</h1>
+                <p class="subtitle">投手がランダムなタイミングと球速で投げてきます。<br>ボールをよく見て、ホームベースの上でスイング！<br><span
+                        class="rules">全12球、または3アウトで試合終了</span></p>
+                <p id="result" class="result"></p><button id="startButton">プレイボール！</button>
+            </div>
+        </div>
+    </div>
+    <a-scene baseball-game cursor="rayOrigin:mouse" raycaster="objects:.clickable" vr-mode-ui="enabled:true"
+        renderer="colorManagement:true;antialias:true;physicallyCorrectLights:true" background="color:#8cc8e8">
+        <a-assets><a-mixin id="white" material="color:#eee;roughness:.85"></a-mixin></a-assets>
+        <!-- Right-handed view: a small parallel offset, still looking straight downfield. -->
+        <a-entity id="rig" position="-.55 0 2.1" rotation="0 0 0">
+            <a-camera position="0 1.65 0" look-controls wasd-controls="enabled:false"><a-entity
+                    cursor="fuse:true;fuseTimeout:1200" raycaster="objects:.clickable;far:12" position="0 0 -1"><a-ring
+                        radius-inner=".012" radius-outer=".018" color="#fff"
+                        material="shader:flat"></a-ring></a-entity></a-camera>
+            <a-entity id="rightHand" hand-controls="hand:right;handModelStyle:lowPoly;color:#c48b62"
+                laser-controls="hand:right" raycaster="objects:.clickable;far:12"
+                line="color:#ffc83d"></a-entity><a-entity id="leftHand"
+                hand-controls="hand:left;handModelStyle:lowPoly;color:#c48b62" laser-controls="hand:left"
+                raycaster="objects:.clickable;far:12" line="color:#ffc83d"></a-entity>
+        </a-entity>
+        <a-entity id="xrMenu" visible="false" position="-.55 1.7 -.4" rotation="0 0 0">
+            <a-plane width="3.25" height="2" color="#0b2918" material="opacity:.96;roughness:.8"></a-plane>
+            <a-text value="STADIUM SLUGGER" align="center" color="#fff4cf" width="4.8" position="0 .57 .015"></a-text>
+            <a-text value="Trigger or gaze to start" align="center" color="#b9d8bd" width="3.1"
+                position="0 .18 .015"></a-text>
+            <a-plane class="clickable" xr-start width="1.65" height=".48" color="#ffc83d" position="0 -.28 .035"
+                material="shader:flat"></a-plane>
+            <a-text value="PLAY BALL!" align="center" color="#281600" width="2.5" position="0 -.32 .055"></a-text>
+            <a-text id="xrResult" value="" align="center" color="#ffe088" width="3.2" position="0 -.72 .02"></a-text>
+        </a-entity>
+        <a-entity id="bat" bat-swing position="-.82 1.22 .25" rotation="0 0 28">
+            <a-entity position="0 -.18 0">
+                <!-- regulation-sized wooden bat: knob, taped handle, tapered neck and barrel -->
+                <a-cylinder radius=".075" height=".055" position="0 -.03 0" color="#211711" material="roughness:.9"
+                    geometry="segmentsRadial:24"></a-cylinder>
+                <a-sphere radius=".087" scale="1 .45 1" position="0 -.07 0" color="#211711"
+                    material="roughness:.9"></a-sphere>
+                <a-cylinder radius=".038" height=".43" position="0 .21 0" color="#29231f" material="roughness:1"
+                    geometry="segmentsRadial:24"></a-cylinder>
+                <a-torus radius=".041" radius-tubular=".006" position="0 .04 0" rotation="90 0 0"
+                    color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006" position="0 .12 0"
+                    rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041" radius-tubular=".006"
+                    position="0 .20 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus radius=".041"
+                    radius-tubular=".006" position="0 .28 0" rotation="90 0 0" color="#b8aa91"></a-torus><a-torus
+                    radius=".041" radius-tubular=".006" position="0 .36 0" rotation="90 0 0" color="#b8aa91"></a-torus>
+                <a-cone radius-bottom=".039" radius-top=".09" height=".54" position="0 .695 0" color="#bd7635"
+                    material="roughness:.58;metalness:.02" geometry="segmentsRadial:32"></a-cone>
+                <a-cylinder radius=".09" height=".69" position="0 1.31 0" color="#d8954c"
+                    material="roughness:.52;metalness:.02" geometry="segmentsRadial:32"></a-cylinder>
+                <a-sphere radius=".09" scale="1 .3 1" position="0 1.655 0" color="#d8954c"
+                    material="roughness:.52"></a-sphere>
+                <a-ring radius-inner=".068" radius-outer=".075" position="0 1.18 .064" rotation="90 0 0" color="#6f3c1d"
+                    material="shader:flat;side:double"></a-ring>
+            </a-entity>
+        </a-entity>
+        <a-entity id="ball" pitch visible="false">
+            <a-sphere radius=".14" color="#fffdf4" material="roughness:.72"></a-sphere>
+            <a-torus radius=".105" radius-tubular=".006" rotation="18 12 0" color="#b52d2d"
+                material="shader:flat"></a-torus><a-torus radius=".105" radius-tubular=".006" rotation="-18 12 0"
+                color="#b52d2d" material="shader:flat"></a-torus>
+            <a-cone radius-bottom=".075" radius-top=".01" height=".6" position="0 0 -.34" rotation="-90 0 0"
+                color="#ffffff" material="shader:flat;transparent:true;opacity:.2"></a-cone>
+        </a-entity>
+        <a-entity id="pitcher" position="0 0 -16"><a-cylinder radius=".3" height="1.15" position="0 .85 0"
+                color="#f1eee4"></a-cylinder><a-sphere radius=".25" position="0 1.65 0"
+                color="#b97953"></a-sphere><a-cylinder radius=".27" height=".16" position="0 1.86 0"
+                color="#cf3434"></a-cylinder><a-box width=".85" height=".08" depth=".2" position="0 .06 .15"
+                color="#fff"></a-box></a-entity>
+        <a-plane position="0 .012 0" rotation="-90 0 0" width="80" height="90" color="#216b37"
+            material="roughness:1"></a-plane>
+        <a-plane position="0 .018 -13" rotation="-90 0 45" width="16" height="16" color="#9b683a"></a-plane>
+        <a-plane position="0 .026 .18" rotation="-90 0 0" width=".75" height=".75" color="#fff"
+            geometry="primitive:triangle;vertexA:-.52 .45 0;vertexB:.52 .45 0;vertexC:0 -.45 0"></a-plane>
+        <a-entity position="0 1.14 .34">
+            <a-box width=".9" height=".018" depth=".018" position="0 .39 0" color="#ffe36b"
+                material="shader:flat;opacity:.65;transparent:true"></a-box><a-box width=".9" height=".018" depth=".018"
+                position="0 -.39 0" color="#ffe36b" material="shader:flat;opacity:.65;transparent:true"></a-box><a-box
+                width=".018" height=".8" depth=".018" position="-.44 0 0" color="#ffe36b"
+                material="shader:flat;opacity:.65;transparent:true"></a-box><a-box width=".018" height=".8" depth=".018"
+                position=".44 0 0" color="#ffe36b" material="shader:flat;opacity:.65;transparent:true"></a-box>
+        </a-entity>
+        <a-box position="-13 1.2 -28" width=".25" height="2.4" depth="55" color="#eadbba"
+            rotation="0 -25 0"></a-box><a-box position="13 1.2 -28" width=".25" height="2.4" depth="55" color="#eadbba"
+            rotation="0 25 0"></a-box>
+        <a-entity position="0 0 -43"><a-cylinder radius="32" height="5" open-ended="true" side="double" color="#17482b"
+                material="side:double" geometry="thetaLength:180;thetaStart:0"
+                rotation="0 90 0"></a-cylinder></a-entity>
+        <a-light type="ambient" color="#d9edff" intensity="1.1"></a-light><a-light type="directional" color="#fff6d7"
+            intensity="1.6" position="-8 15 6"></a-light>
+    </a-scene>
 </body>
+
 </html>
