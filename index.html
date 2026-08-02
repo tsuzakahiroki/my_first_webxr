@@ -2,49 +2,158 @@
 <html>
 
 <head>
-    <title>WebXR Interaction</title>
-    <!-- A-Frameの読み込み -->
+    <title>WebXR Space Interceptor</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-
-    <!-- 独自の動き（コンポーネント）をJavaScriptで定義 -->
     <script>
-        AFRAME.registerComponent('change-color-on-click', {
+        // ゲーム全体の管理コンポーネント
+        AFRAME.registerComponent('game-manager', {
             init: function () {
-                // このスクリプトがくっついている図形を取得
-                let el = this.el;
-                // ランダムに選ぶ色のリスト
-                let colors = ['#EF2D5E', '#4CC3D9', '#FFC65D', '#8A2BE2', '#32CD32'];
+                this.score = 0;
+                this.scoreText = document.querySelector('#scoreBoard');
+                this.rig = document.querySelector('#ship-rig'); // 宇宙船の土台
 
-                // 「クリック（トリガー）」された時の処理
-                el.addEventListener('click', function () {
-                    let randomIndex = Math.floor(Math.random() * colors.length);
-                    el.setAttribute('color', colors[randomIndex]);
+                // キーボード操作の検知（A/Dで旋回）
+                this.keys = {};
+                window.addEventListener('keydown', (e) => { this.keys[e.key.toLowerCase()] = true; });
+                window.addEventListener('keyup', (e) => { this.keys[e.key.toLowerCase()] = false; });
+
+                // 弾のプール（使い回し用）
+                this.laserColor = '#00FF66';
+            },
+            tick: function (time, timeDelta) {
+                if (!this.rig) return;
+
+                // 船の旋回制御（Aで左、Dで右）
+                let rotation = this.rig.getAttribute('rotation');
+                if (this.keys['a']) {
+                    rotation.y += 0.08 * timeDelta; // 左旋回
+                }
+                if (this.keys['d']) {
+                    rotation.y -= 0.08 * timeDelta; // 右旋回
+                }
+                this.rig.setAttribute('rotation', rotation);
+            },
+            addScore: function (pts) {
+                this.score += pts;
+                this.scoreText.setAttribute('value', 'TARGET DESTROYED: ' + this.score);
+            }
+        });
+
+        // ターゲット（敵機・隕石）の挙動
+        AFRAME.registerComponent('space-target', {
+            init: function () {
+                let el = this.el;
+                this.mgr = document.querySelector('a-scene').components['game-manager'];
+
+                // ロックオン（ホバー）時の演出
+                el.addEventListener('mouseenter', () => {
+                    el.setAttribute('material', 'emissive', '#FF3333');
+                    el.setAttribute('material', 'emissiveIntensity', '1');
                 });
+                el.addEventListener('mouseleave', () => {
+                    el.setAttribute('material', 'emissiveIntensity', '0.2');
+                });
+
+                // 撃撃（クリック）時の処理
+                el.addEventListener('click', () => {
+                    if (this.mgr) this.mgr.addScore(100);
+
+                    // パルス爆発エフェクト（一瞬巨大化して消える）
+                    el.setAttribute('animation__explode', 'property: scale; to: 3 3 3; dur: 200');
+                    el.setAttribute('animation__fade', 'property: material.opacity; to: 0; dur: 200');
+
+                    setTimeout(() => {
+                        this.respawn();
+                    }, 200);
+                });
+            },
+            respawn: function () {
+                let el = this.el;
+                // プレイヤーの前方半球にランダム配置
+                let angle = Math.random() * Math.PI * 2;
+                let radius = 15 + Math.random() * 15;
+                let x = Math.cos(angle) * radius;
+                let y = (Math.random() - 0.2) * 10;
+                let z = Math.sin(angle) * radius;
+
+                el.setAttribute('position', { x: x, y: y, z: z });
+                el.removeAttribute('animation__explode');
+                el.removeAttribute('animation__fade');
+                el.setAttribute('scale', '1 1 1');
+                el.setAttribute('material', 'opacity', '1');
+
+                // タイプ別の見た目変化（球体＝隕石、コーン＝敵戦闘機）
+                let types = ['a-sphere', 'a-cone'];
+                let chosen = types[Math.floor(Math.random() * types.length)];
+                // 簡易的に色や発光度をリセット
+                el.setAttribute('material', 'emissive', '#FFCC00');
             }
         });
     </script>
 </head>
 
 <body>
-    <!-- PC確認用にマウス操作(cursor)も有効化 -->
-    <a-scene cursor="rayOrigin: mouse">
+    <a-scene cursor="rayOrigin: mouse" game-manager>
 
-        <!-- ターゲットの箱（回転アニメーションと、クリック判定を追加） -->
-        <a-box position="0 1.5 -3" rotation="0 45 0" color="#4CC3D9" change-color-on-click
-            animation="property: rotation; to: 0 405 0; loop: true; dur: 3000">
-        </a-box>
+        <a-assets>
+            <img id="space-bg" src="https://cdn.aframe.io/360-image-gallery-boilerplate/img/seaside.jpg"
+                crossorigin="anonymous">
+        </a-assets>
 
-        <!-- プレイヤーの視点とコントローラーの設定 -->
-        <a-entity>
-            <a-camera></a-camera>
-            <!-- 右手・左手にレーザーポインターを持たせる -->
-            <a-entity laser-controls="hand: right" raycaster="objects: a-box"></a-entity>
-            <a-entity laser-controls="hand: left" raycaster="objects: a-box"></a-entity>
+        <a-entity id="ship-rig" position="0 0 0" rotation="0 0 0">
+            <a-camera position="0 0 0">
+                <a-entity position="0 0 -1">
+                    <a-ring radius-inner="0.02" radius-outer="0.025" color="#00FF66"
+                        material="shader: flat; opacity: 0.6"></a-ring>
+                    <a-ring radius-inner="0.005" radius-outer="0.008" color="#00FF66" material="shader: flat"></a-ring>
+
+                    <a-text id="scoreBoard" value="TARGET DESTROYED: 0" color="#00FF66" font="monoid" position="0 0.4 0"
+                        scale="0.2 0.2 0.2" align="center"></a-text>
+
+                    <a-text value="[A] [D] KEY TO TURN SHIP / CLICK TO FIRE" color="#FFFFFF" font="monoid"
+                        position="0 -0.4 0" scale="0.12 0.12 0.12" align="center" opacity="0.7"></a-text>
+                </a-entity>
+            </a-camera>
+
+            <a-entity laser-controls="hand: right" raycaster="objects: .enemy; far: 40"
+                line="color: #00FF66; opacity: 0.9"></a-entity>
+            <a-entity laser-controls="hand: left" raycaster="objects: .enemy; far: 40"
+                line="color: #00FF66; opacity: 0.9"></a-entity>
+
+            <a-cone position="-1.8 -0.5 -2" rotation="90 0 30" radius-bottom="0.2" radius-top="0.01" height="1.5"
+                color="#444655"></a-cone>
+            <a-cone position="1.8 -0.5 -2" rotation="90 0 -30" radius-bottom="0.2" radius-top="0.01" height="1.5"
+                color="#444655"></a-cone>
         </a-entity>
 
-        <!-- 床と空 -->
-        <a-plane position="0 0 -4" rotation="-90 0 0" width="10" height="10" color="#7BC8A4"></a-plane>
-        <a-sky color="#ECECEC"></a-sky>
+        <a-entity class="enemy" space-target position="0 2 -12" geometry="primitive: box; width: 2; height: 2; depth: 2"
+            material="color: #333; roughness: 0.2; metalness: 0.8; emissive: #FFCC00; emissiveIntensity: 0.2"
+            animation="property: rotation; to: 360 360 0; loop: true; dur: 8000; easing: linear">
+        </a-entity>
+
+        <a-entity class="enemy" space-target position="-8 -2 -15"
+            geometry="primitive: cone; radiusBottom: 1.5; height: 3"
+            material="color: #222; roughness: 0.1; metalness: 0.9; emissive: #FF00FF; emissiveIntensity: 0.2"
+            animation="property: rotation; to: 0 360 360; loop: true; dur: 6000; easing: linear">
+        </a-entity>
+
+        <a-entity class="enemy" space-target position="7 4 -8" geometry="primitive: octahedron; radius: 1.8"
+            material="color: #444; roughness: 0.5; metalness: 0.5; emissive: #00FFFF; emissiveIntensity: 0.2"
+            animation="property: rotation; to: 360 0 360; loop: true; dur: 10000; easing: linear">
+        </a-entity>
+
+        <a-entity position="0 0 0">
+            <a-sphere position="5 10 -20" radius="0.1" color="#FFF" material="shader:flat"></a-sphere>
+            <a-sphere position="-15 5 -25" radius="0.15" color="#FFF" material="shader:flat"></a-sphere>
+            <a-sphere position="12 -8 -18" radius="0.08" color="#FFF" material="shader:flat"></a-sphere>
+            <a-sphere position="-5 -12 -15" radius="0.12" color="#FFF" material="shader:flat"></a-sphere>
+            <a-sphere position="20 2 -30" radius="0.2" color="#FFCCCC" material="shader:flat"></a-sphere>
+            <a-sphere position="-22 -2 -28" radius="0.1" color="#CCFFFF" material="shader:flat"></a-sphere>
+        </a-entity>
+
+        <a-sky color="#02000a"></a-sky>
+        <a-light type="ambient" color="#333355"></a-light>
+        <a-light type="directional" color="#FFF" intensity="0.8" position="5 10 5"></a-light>
 
     </a-scene>
 </body>
