@@ -72,8 +72,8 @@
         const gm=this.el.sceneEl.components['baseball-game'];if(!gm.active)return;
         this.winding=true;gm.callout('GET READY',430);gm.pitcher.removeAttribute('animation__throw');gm.pitcher.setAttribute('animation__throw','property:rotation;from:0 0 0;to:-24 0 10;dir:alternate;dur:330;loop:1;easing:easeInOutQuad');
         this.releaseTimer=setTimeout(()=>{
-          // Every pitch aims inside the plate-width strike zone.
-          if(!gm.active)return;const targetX=(Math.random()-.5)*.82,targetY=.78+Math.random()*.72,speed=22+Math.random()*4,distance=15.9,time=distance/speed;
+          // The ball crosses home plate, not the player's head position.
+          if(!gm.active)return;const targetX=(Math.random()-.5)*.7,targetY=.86+Math.random()*.55,speed=22+Math.random()*4,distance=15.9,time=distance/speed;
           this.startPos.set(-.32,2.02,-15.55);this.el.object3D.position.copy(this.startPos);this.v.set((targetX+.32)/time,(targetY-2.02)/time,speed);this.flightTime=0;this.flying=true;this.winding=false;this.batted=false;this.crossedPlate=false;this.el.setAttribute('visible',true);gm.tone(145,.045,'triangle');
         },560);
       },
@@ -134,11 +134,12 @@
   </div>
   <a-scene baseball-game cursor="rayOrigin:mouse" raycaster="objects:.clickable" vr-mode-ui="enabled:true" renderer="colorManagement:true;antialias:true;physicallyCorrectLights:true" background="color:#8cc8e8">
     <a-assets><a-mixin id="white" material="color:#eee;roughness:.85"></a-mixin></a-assets>
-    <a-entity id="rig" position="0 0 2.1">
+    <!-- Right-handed view: a small parallel offset, still looking straight downfield. -->
+    <a-entity id="rig" position="-.55 0 2.1" rotation="0 0 0">
       <a-camera position="0 1.65 0" look-controls wasd-controls="enabled:false"><a-entity cursor="fuse:true;fuseTimeout:1200" raycaster="objects:.clickable;far:12" position="0 0 -1"><a-ring radius-inner=".012" radius-outer=".018" color="#fff" material="shader:flat"></a-ring></a-entity></a-camera>
       <a-entity id="rightHand" hand-controls="hand:right;handModelStyle:lowPoly;color:#c48b62" laser-controls="hand:right" raycaster="objects:.clickable;far:12" line="color:#ffc83d"></a-entity><a-entity id="leftHand" hand-controls="hand:left;handModelStyle:lowPoly;color:#c48b62" laser-controls="hand:left" raycaster="objects:.clickable;far:12" line="color:#ffc83d"></a-entity>
     </a-entity>
-    <a-entity id="xrMenu" visible="false" position="0 1.7 -.4">
+    <a-entity id="xrMenu" visible="false" position="-.55 1.7 -.4" rotation="0 0 0">
       <a-plane width="3.25" height="2" color="#0b2918" material="opacity:.96;roughness:.8"></a-plane>
       <a-text value="STADIUM SLUGGER" align="center" color="#fff4cf" width="4.8" position="0 .57 .015"></a-text>
       <a-text value="Trigger or gaze to start" align="center" color="#b9d8bd" width="3.1" position="0 .18 .015"></a-text>
@@ -146,7 +147,7 @@
       <a-text value="PLAY BALL!" align="center" color="#281600" width="2.5" position="0 -.32 .055"></a-text>
       <a-text id="xrResult" value="" align="center" color="#ffe088" width="3.2" position="0 -.72 .02"></a-text>
     </a-entity>
-    <a-entity id="bat" bat-swing position=".82 1.22 .25" rotation="0 0 -28">
+    <a-entity id="bat" bat-swing position="-.82 1.22 .25" rotation="0 0 28">
       <a-entity position="0 -.18 0">
       <!-- regulation-sized wooden bat: knob, taped handle, tapered neck and barrel -->
       <a-cylinder radius=".075" height=".055" position="0 -.03 0" color="#211711" material="roughness:.9" geometry="segmentsRadial:24"></a-cylinder>
