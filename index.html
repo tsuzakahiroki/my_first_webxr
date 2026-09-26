@@ -448,10 +448,21 @@
           ).padStart(5, "0");
           document.querySelector("#hits").textContent = this.hits;
           document.querySelector("#hr").textContent = this.homeRuns;
-          document.querySelector("#strikes").textContent =
-            "●".repeat(this.strikes) + "○".repeat(2 - this.strikes);
-          document.querySelector("#outs").textContent =
-            "●".repeat(this.outs) + "○".repeat(Math.max(0, 3 - this.outs));
+          
+          const strikeText = "●".repeat(this.strikes) + "○".repeat(Math.max(0, 2 - this.strikes));
+          const outText = "●".repeat(this.outs) + "○".repeat(Math.max(0, 3 - this.outs));
+          
+          document.querySelector("#strikes").textContent = strikeText;
+          document.querySelector("#outs").textContent = outText;
+
+          const xrScoreEl = document.querySelector("#xrScore");
+          if (xrScoreEl) xrScoreEl.setAttribute("value", "SCORE: " + this.score);
+          
+          const xrStrikesEl = document.querySelector("#xrStrikes");
+          if (xrStrikesEl) xrStrikesEl.setAttribute("value", "S: " + strikeText);
+          
+          const xrOutsEl = document.querySelector("#xrOuts");
+          if (xrOutsEl) xrOutsEl.setAttribute("value", "O: " + outText);
         },
       });
 
