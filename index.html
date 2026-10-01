@@ -301,10 +301,18 @@
           this.xrMenu = document.querySelector("#xrMenu");
           this.el.addEventListener("enter-vr", () => {
             this.overlay.classList.add("hidden");
-            this.xrMenu.setAttribute("visible", !this.active);
+            const showMenu = !this.active;
+            this.xrMenu.setAttribute("visible", showMenu);
+            const xrBtn = this.xrMenu.querySelector("[xr-start]");
+            if (xrBtn) {
+              if (showMenu) xrBtn.classList.add("clickable");
+              else xrBtn.classList.remove("clickable");
+            }
           });
           this.el.addEventListener("exit-vr", () => {
             this.xrMenu.setAttribute("visible", false);
+            const xrBtn = this.xrMenu.querySelector("[xr-start]");
+            if (xrBtn) xrBtn.classList.remove("clickable");
             if (!this.active) this.overlay.classList.remove("hidden");
           });
           this.updateUI();
@@ -646,15 +654,20 @@
 
       AFRAME.registerComponent("xr-start", {
         init() {
-          this.el.addEventListener("mouseenter", () =>
-            this.el.setAttribute("material", "color", "#ffe477"),
-          );
-          this.el.addEventListener("mouseleave", () =>
-            this.el.setAttribute("material", "color", "#ffc83d"),
-          );
+          this.el.addEventListener("mouseenter", () => {
+            if (this.el.sceneEl.is("vr-mode")) {
+              this.el.setAttribute("material", "color", "#ffe477");
+            }
+          });
+          this.el.addEventListener("mouseleave", () => {
+            this.el.setAttribute("material", "color", "#ffc83d");
+          });
           this.el.addEventListener("click", (e) => {
             e.stopPropagation();
-            this.el.sceneEl.components["baseball-game"].start();
+            const game = this.el.sceneEl.components["baseball-game"];
+            if (this.el.sceneEl.is("vr-mode") && !game.active) {
+              game.start();
+            }
           });
         },
       });
@@ -716,7 +729,7 @@
           look-controls
           wasd-controls="enabled:false"
           ><a-entity
-            cursor="fuse:true;fuseTimeout:1200"
+            cursor="fuse:false"
             raycaster="objects:.clickable;far:12"
             position="0 0 -1"
             ><a-ring
@@ -768,7 +781,6 @@
           position="0 .18 .015"
         ></a-text>
         <a-plane
-          class="clickable"
           xr-start
           width="1.65"
           height=".48"
